@@ -59,7 +59,13 @@ cd HelloVM-AI-Funland
 ```
 
 #### 2. 后端环境配置 / Backend Setup
+
+**后端服务已完全实现 / Backend Service Fully Implemented:**
+
 ```bash
+# 进入后端目录 / Navigate to backend directory
+cd api
+
 # 创建 Python 虚拟环境 / Create Python virtual environment
 python -m venv venv
 
@@ -72,8 +78,49 @@ source venv/bin/activate
 # 安装依赖 / Install dependencies
 pip install -r requirements.txt
 
-# 配置硬件加速 / Configure hardware acceleration
-python scripts/setup_accelerators.py
+# 配置环境变量 / Configure environment
+cp .env.example .env
+# 编辑 .env 文件配置您的硬件加速设置 / Edit .env to configure your hardware acceleration settings
+
+# 启动后端服务 / Start backend service
+python start.py
+```
+
+**后端特性 / Backend Features:**
+- **🔧 硬件检测服务 / Hardware Detection Service**: 自动检测 CPU、Intel GPU、Intel NPU、NVIDIA GPU
+- **🤖 模型管理服务 / Model Management Service**: Modelscope API 集成，模型加载/卸载
+- **💬 聊天服务 / Chat Service**: 实时 LLM 推理，会话管理
+- **🌐 WebSocket 服务 / WebSocket Service**: 实时双向通信，流式响应
+- **📊 性能监控 / Performance Monitoring**: 实时指标收集，健康检查
+
+**API 端点 / API Endpoints:**
+```
+硬件管理 / Hardware Management:
+GET  /api/v1/hardware/status          # 获取硬件状态
+POST /api/v1/hardware/scan            # 触发硬件扫描
+POST /api/v1/hardware/select/{id}     # 选择主设备
+GET  /api/v1/hardware/metrics/{id}    # 获取设备指标
+
+模型管理 / Model Management:
+GET  /api/v1/models                   # 列出所有模型
+GET  /api/v1/models/{id}              # 获取模型详情
+POST /api/v1/models/{id}/load         # 加载模型
+POST /api/v1/models/{id}/unload       # 卸载模型
+
+聊天管理 / Chat Management:
+POST /api/v1/chat/sessions            # 创建聊天会话
+GET  /api/v1/chat/sessions/{id}       # 获取会话详情
+POST /api/v1/chat/sessions/{id}/messages  # 发送消息
+```
+
+**WebSocket 连接 / WebSocket Connection:**
+```javascript
+const ws = new WebSocket('ws://localhost:8000/ws/client_123');
+ws.send(JSON.stringify({
+    type: 'chat',
+    session_id: 'session_123',
+    message: 'Hello!'
+}));
 ```
 
 #### 3. 前端环境配置 / Frontend Setup

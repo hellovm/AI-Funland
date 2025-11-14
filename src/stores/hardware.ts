@@ -27,6 +27,7 @@ export const useHardwareStore = defineStore('hardware', () => {
 
   const primaryDevice = computed(() => selectedConfig.value.primaryDevice)
   const secondaryDevices = computed(() => selectedConfig.value.secondaryDevices || [])
+  const hardware = computed(() => devices.value)
 
   async function detectHardware() {
     isDetecting.value = true
@@ -127,6 +128,15 @@ export const useHardwareStore = defineStore('hardware', () => {
     }
   }
 
+  function updateHardwareStatus(hardwareStatus: any) {
+    if (hardwareStatus.devices) {
+      devices.value = hardwareStatus.devices
+    }
+    if (hardwareStatus.primary_device) {
+      selectedConfig.value.primaryDevice = hardwareStatus.primary_device
+    }
+  }
+
   return {
     devices,
     selectedConfig,
@@ -135,12 +145,14 @@ export const useHardwareStore = defineStore('hardware', () => {
     selectedDevices,
     primaryDevice,
     secondaryDevices,
+    hardware,
     detectHardware,
     selectPrimaryDevice,
     addSecondaryDevice,
     removeSecondaryDevice,
     setAccelerationMode,
     updateDeviceUtilization,
-    updateDeviceTemperature
+    updateDeviceTemperature,
+    updateHardwareStatus
   }
 })

@@ -84,20 +84,22 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
-  timestamp: number
+  timestamp: Date
   model?: string
+  hardware?: string
   tokens?: number
   processingTime?: number
+  isError?: boolean
 }
 
 export interface ChatSession {
   id: string
   title: string
   messages: ChatMessage[]
-  modelId: string
-  hardwareConfig: AccelerationConfig
-  createdAt: number
-  updatedAt: number
+  model?: ModelInfo
+  hardware?: HardwareDevice
+  createdAt: Date
+  updatedAt: Date
 }
 
 export interface InferenceParams {

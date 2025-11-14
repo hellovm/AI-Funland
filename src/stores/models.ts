@@ -139,6 +139,10 @@ export const useModelsStore = defineStore('models', () => {
     return models.value.filter(model => model.tags.includes(tag))
   }
 
+  function updateModelsList(newModels: ModelInfo[]) {
+    models.value = newModels
+  }
+
   return {
     models,
     isLoading,
@@ -154,6 +158,7 @@ export const useModelsStore = defineStore('models', () => {
     markAsDownloaded,
     searchModels,
     filterByFormat,
-    filterByTag
+    filterByTag,
+    updateModelsList
   }
 })
