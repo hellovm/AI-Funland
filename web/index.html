@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Funland</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">AI Funland</div>
+      <div class="controls">
+        <select id="lang">
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+        </select>
+        <select id="accelerator"></select>
+      </div>
+    </header>
+    <section class="sysinfo" id="sysinfo"></section>
+    <main class="grid">
+      <section class="card" id="models">
+        <h2 data-i18n="models_title">Models</h2>
+        <div class="row">
+          <input id="model_id" placeholder="modelscope id" class="grow" value="qwen/Qwen2.5-0.5B-Instruct">
+          <button id="btn_download" data-i18n="download">Download</button>
+          <button id="btn_dl_quant_int8" data-i18n="download_quant8">Download+INT8</button>
+        </div>
+        <div class="row small">
+          <input id="include" placeholder="include patterns">
+          <input id="exclude" placeholder="exclude patterns">
+          <input id="revision" placeholder="revision">
+        </div>
+        <div id="download_status"></div>
+        <div class="list" id="model_list"></div>
+      </section>
+      <section class="card" id="chat">
+        <h2 data-i18n="chat_title">Chat</h2>
+        <div class="row">
+          <select id="model_select" class="grow"></select>
+          <button id="btn_quant_int8" data-i18n="quant_int8">Quant INT8</button>
+          <button id="btn_quant_int4" data-i18n="quant_int4">Quant INT4</button>
+        </div>
+        <textarea id="prompt" placeholder="Type your question" rows="5"></textarea>
+        <div class="row">
+          <input id="max_new" type="number" value="128" min="1">
+          <input id="temperature" type="number" value="0.7" step="0.1">
+          <input id="top_k" type="number" value="50" min="1">
+          <input id="top_p" type="number" value="0.9" step="0.1">
+          <input id="rep_penalty" type="number" value="1.1" step="0.1">
+          <button id="btn_generate" data-i18n="generate">Generate</button>
+        </div>
+        <pre id="output" class="output"></pre>
+      </section>
+    </main>
+    <footer class="foot">
+      <span>V0.0.1 Dev · 2025-11-19</span>
+    </footer>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
