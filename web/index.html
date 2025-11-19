@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM Q&A</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+  <body>
+  <div id="toast" class="toast"></div>
+  <div class="toolbar">
+    <select id="lang">
+      <option value="en">English</option>
+      <option value="zh">中文</option>
+    </select>
+    <select id="device"></select>
+    <select id="model"></select>
+    <button id="refreshModels"></button>
+  </div>
+  <div class="grid">
+    <section class="panel">
+      <h2 id="qa_title"></h2>
+      <div class="chat">
+        <textarea id="prompt" rows="6"></textarea>
+        <button id="send"></button>
+        <pre id="output"></pre>
+      </div>
+    </section>
+    <section class="panel">
+      <h2 id="models_title"></h2>
+      <div class="models">
+        <input id="model_id" placeholder="modelscope id">
+        <button id="download"></button>
+        <div id="downloads"></div>
+        <div class="model-actions">
+          <select id="quant_mode">
+            <option value="FP16">FP16</option>
+            <option value="INT8">INT8</option>
+          </select>
+          <button id="quantize"></button>
+          <button id="delete"></button>
+        </div>
+        <div class="quant-config">
+          <h3 id="quant_cfg_title"></h3>
+          <div class="row">
+            <label id="bits_label"></label>
+            <select id="bits">
+              <option value="8">8</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+          <div class="row">
+            <label id="weight_dtype_label"></label>
+            <select id="weight_dtype">
+              <option value="int8">int8</option>
+              <option value="nf4">nf4</option>
+              <option value="int4">int4</option>
+            </select>
+          </div>
+          <div class="row">
+            <label id="method_label"></label>
+            <select id="method">
+              <option value="weight">Weight-only</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="mixed">Mixed (NF4+F8E4M3)</option>
+            </select>
+          </div>
+          <div class="row">
+            <label id="activation_dtype_label"></label>
+            <select id="activation_dtype">
+              <option value="f8e4m3">f8e4m3</option>
+              <option value="int8">int8</option>
+            </select>
+          </div>
+          <div class="row">
+            <label id="range_label"></label>
+            <select id="range">
+              <option value="per_tensor">Per-tensor</option>
+              <option value="per_channel">Per-channel</option>
+            </select>
+          </div>
+          <div class="row">
+            <label id="dataset_label"></label>
+            <input id="dataset" placeholder="dataset for calibration (optional)">
+          </div>
+          <div class="row">
+            <button id="save_preset"></button>
+            <button id="load_preset"></button>
+            <button id="import_preset"></button>
+            <button id="export_preset"></button>
+            <input type="file" id="import_file" style="display:none">
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2 id="sys_title"></h2>
+      <div id="sysinfo"></div>
+    </section>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
