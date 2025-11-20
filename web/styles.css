@@ -22,7 +22,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 .page{display:none}
 .page.active{display:block}
 .chat-layout{display:grid;grid-template-columns:1fr 360px;gap:16px;align-items:start}
-.chat-main{grid-column:1}
+.chat-main{grid-column:1;display:flex;flex-direction:column}
 .chat-side{grid-column:2}
 .card{background:var(--surface);border:1px solid #e0e0e0;border-radius:16px;padding:16px;box-shadow:var(--elev2);overflow:hidden}
 .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
@@ -50,11 +50,18 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 .overlay .box{background:#ffffff;color:#333333;padding:16px 20px;border-radius:16px;min-width:300px;display:flex;flex-direction:column;gap:12px;align-items:center;box-shadow:0 10px 24px rgba(0,0,0,.18)}
 .spinner{width:32px;height:32px;border:4px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.chat{display:flex;flex-direction:column;gap:10px;margin:10px 0;max-height:none;min-height:320px;overflow:auto;background:var(--card);border:1px solid #e0e0e0;border-radius:12px;padding:12px}
+.chat{display:flex;flex-direction:column;gap:10px;margin:10px 0;min-height:240px;overflow:auto;background:var(--card);border:1px solid #e0e0e0;border-radius:12px;padding:12px;flex:1}
 .chat-input{display:flex;flex-direction:column;gap:8px;margin-top:8px}
 .bubble{max-width:72%;padding:10px 12px;border-radius:14px;line-height:1.5;word-break:break-word;transition:transform 220ms ease}
 .bubble.user{background:rgba(98,0,238,.10);border:1px solid var(--primary);align-self:flex-end}
 .bubble.assistant{background:#ffffff;border:1px solid #e0e0e0;align-self:flex-start}
+.bubble.assistant p{margin:8px 0}
+.bubble.assistant h3,.bubble.assistant h4,.bubble.assistant h5{margin:8px 0 4px;font-weight:600}
+.bubble.assistant ul,.bubble.assistant ol{margin:8px 0 8px 20px}
+.bubble.assistant code{background:rgba(0,0,0,.06);padding:2px 4px;border-radius:4px}
+.bubble.assistant pre{background:#f7f7f7;border:1px solid #e0e0e0;border-radius:8px;padding:10px;overflow:auto}
+.bubble.assistant a{color:var(--primary);text-decoration:none}
+.bubble.assistant a:hover{text-decoration:underline}
 .bubble.thinking{display:flex;align-items:center}
 .typing{display:flex;gap:4px;align-items:center}
 .typing .d{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink .8s ease-in-out infinite}

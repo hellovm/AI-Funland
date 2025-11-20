@@ -26,6 +26,23 @@ Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基�
 - 📈 性能面板与告警：`/api/perf` 监控延迟，展示 TTFT/TPOT/Throughput；系统信息显示库版本
 - 🚀 一键启动 `start.bat`，无需 Node.js；项目缓存：`tmp/`（可用 `AIFUNLAND_CACHE_DIR` 定制）
 - 🧱 模块化架构，预留扩展接口（文生图/视频等）
+ - 💬 微信式自然聊天体验：SSE 流式分片输出、消息自动滚动到底部
+ - 🧾 富文本排版：支持 Markdown 标题/列表/链接/代码块，提升可读性
+
+## Why NPU Acceleration / 为什么要支持 NPU 加速
+
+- 普及的本地硬件：Intel Core Ultra 轻薄本与台式机正广泛配备 NPU，无需独立显卡即可获得可观的推理加速。
+- 低功耗高效率：在注意力、并行算子等典型工作负载上，NPU 以更低功耗提供稳定吞吐，单位能效优于仅用 CPU 的方案，适合电池供电场景。
+- 更低首帧时间（TTFT）：结合 OpenVINO 的优化与编译缓存（如 `OV_CACHE_DIR`），端上对话类任务首帧时间显著下降，提升体感速度。
+- 与 GPU 协同增益：通过 OpenVINO 的 `MULTI:NPU,GPU` 组合，将不同阶段的计算分布到合适的处理器上，在相同功耗下提升整体吞吐或降低尾时延。
+- 释放系统资源：高占用算子从 CPU 转移至 NPU 后，系统保持更高交互响应性，后台任务对前台影响更小。
+- 成本与便携优势：不依赖高端独显即可获得可用的加速能力，降低硬件成本并兼顾轻薄与续航。
+- 可调优的并行与调度：支持 `OV_PERFORMANCE_HINT`、`OV_NUM_STREAMS`、`OV_HINT_NUM_REQUESTS`、`NPU_TILES` 等参数，按场景在延迟与吞吐间平衡；前端提供可视化设置与持久化。
+- 生态与工具链成熟：OpenVINO GenAI 与 Optimum-Intel 提供从模型转换、量化到推理管线的一体化支持；常见开源模型均可便捷落地端侧。
+- 本地隐私与合规：数据不出设备，适合企业内网、隐私敏感与离线环境。
+- 更好的电池续航：在移动设备上以更低能耗完成推理，延长工作时长。
+
+适用场景示例：本地问答助手、快速摘要/检索增强生成（RAG）终端、移动办公与演示、教育与科研设备、需要合规/隐私保护的行业应用等。
 
 ## Release Notes · V0.0.2 Dev（2025/11/20）
 
@@ -78,7 +95,7 @@ Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基�
    - 启动后端并打开浏览器 `http://127.0.0.1:8000/`
 2. 在 “Models” 输入框使用默认模型：`qwen/Qwen2.5-0.5B-Instruct`
 3. 点击 “Download” 或 “Download+INT8” 一键体验
-4. 在 “Chat” 区选择模型，输入问题，点击 “Generate”
+4. 在 “Chat” 区选择模型，输入问题，点击 “Send/发送”
 
 Tips：如需自定义缓存目录，设置环境变量 `AIFUNLAND_CACHE_DIR`（默认 `d:\codes\AI Funland\tmp`）。
 
@@ -89,6 +106,7 @@ Tips：如需自定义缓存目录，设置环境变量 `AIFUNLAND_CACHE_DIR`（
 - Hardware info and accelerator selection: CPU, Intel GPU, Intel Ultra NPU, NVIDIA GPU
 - Responsive, modern UI; no Node.js required; one-click `start.bat`
 - Project-scoped cache (`tmp/`), robust download with retries and API fallback
+ - Streaming output (SSE) with natural chat, markdown rendering, auto-scroll
 
 ## 功能（中文）
 
@@ -97,6 +115,7 @@ Tips：如需自定义缓存目录，设置环境变量 `AIFUNLAND_CACHE_DIR`（
 - 系统硬件信息与加速器选择：CPU / Intel GPU / Intel NPU / NVIDIA GPU
 - 响应式现代化 UI；无需 Node.js；一键 `start.bat`
 - 项目级缓存（`tmp/`）；下载重试与 API 回退，稳健可靠
+ - 流式输出（SSE）与自然聊天；支持 Markdown 富文本排版与自动滚动
 
 ## Architecture / 架构
 
@@ -149,7 +168,45 @@ transformers==4.57.1
 
 ## Credits / 致谢
 
-- OpenVINO · OpenVINO GenAI · Optimum OpenVINO · ModelScope
+- 感谢以下开源项目与生态工具：
+  - OpenVINO · OpenVINO GenAI · Optimum-Intel · ModelScope · Transformers · Flask · Python
+
+<div align="center">
+  <a href="https://www.intel.com/content/www/us/en/developer/tools/openvino-toolkit/overview.html" title="OpenVINO" style="margin:6px;display:inline-block">
+    <img src="web/static/logos/intel.svg" height="28" alt="OpenVINO" />
+    <span> OpenVINO</span>
+  </a>
+  ·
+  <a href="https://github.com/openvinotoolkit/openvino.genai" title="OpenVINO GenAI" style="margin:6px;display:inline-block">
+    <img src="web/static/logos/openvino-genai.svg" height="28" alt="OpenVINO GenAI" />
+    <span> OpenVINO GenAI</span>
+  </a>
+  ·
+  <a href="https://huggingface.co/docs/optimum/main/en/intel/openvino" title="Optimum-Intel" style="margin:6px;display:inline-block">
+    <img src="web/static/logos/optimum-intel.svg" height="28" alt="Optimum-Intel" />
+    <span> Optimum-Intel</span>
+  </a>
+  ·
+  <a href="https://modelscope.cn" title="ModelScope" style="margin:6px;display:inline-block">
+    <img src="web/static/logos/modelscope.svg" height="28" alt="ModelScope" />
+    <span> ModelScope</span>
+  </a>
+  ·
+  <a href="https://huggingface.co/docs/transformers/index" title="Transformers" style="margin:6px;display:inline-block">
+    <img src="web/static/logos/transformers.svg" height="28" alt="Transformers" />
+    <span> Transformers</span>
+  </a>
+  ·
+  <a href="https://flask.palletsprojects.com" title="Flask" style="margin:6px;display:inline-block">
+    <img src="web/static/logos/flask.svg" height="28" alt="Flask" />
+    <span> Flask</span>
+  </a>
+  ·
+  <a href="https://www.python.org/" title="Python" style="margin:6px;display:inline-block">
+    <img src="web/static/logos/python.svg" height="28" alt="Python" />
+    <span> Python</span>
+  </a>
+</div>
 
 ---
 
