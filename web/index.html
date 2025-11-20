@@ -12,9 +12,10 @@
     <header class="topbar">
       <div class="brand">AI Funland</div>
       <nav class="nav">
-        <a href="#models" class="navlink">Models</a>
-        <a href="#chat" class="navlink">Chat</a>
-        <a href="#perf_card" class="navlink">Performance</a>
+        <a href="#chat" class="navlink" data-page="chat">聊天</a>
+        <a href="#models" class="navlink" data-page="models">模型管理</a>
+        <a href="#settings" class="navlink" data-page="settings">系统配置</a>
+        <a href="#about" class="navlink" data-page="about">关于</a>
       </nav>
       <div class="controls">
         <select id="lang" aria-label="Language">
@@ -25,58 +26,134 @@
         <button id="btn_release_global" data-i18n="release" aria-label="Release model">Release</button>
       </div>
     </header>
-    <section class="sysinfo" id="sysinfo"></section>
-    <main class="grid">
-      <section class="card" id="models">
-        <h2 data-i18n="models_title">Models</h2>
-        <div class="row">
-          <input id="model_id" placeholder="modelscope id" class="grow" value="qwen/Qwen2.5-0.5B-Instruct">
-          <button id="btn_download" data-i18n="download">Download</button>
-          <button id="btn_dl_quant_int8" data-i18n="download_quant8">Download+INT8</button>
-        </div>
-        <div class="row small">
-          <input id="include" placeholder="include patterns">
-          <input id="exclude" placeholder="exclude patterns">
-          <input id="revision" placeholder="revision">
-        </div>
-        <div id="download_status"></div>
-        <div class="list" id="model_list"></div>
-      </section>
-      <section class="card" id="chat">
-        <h2 data-i18n="chat_title">Chat</h2>
-        <div class="row">
-          <select id="model_select" class="grow" aria-label="Model"></select>
-          <button id="btn_quant_int8" data-i18n="quant_int8" aria-label="Quantize INT8">Quant INT8</button>
-          <button id="btn_quant_int4" data-i18n="quant_int4" aria-label="Quantize INT4">Quant INT4</button>
-          <button id="btn_release" data-i18n="release" aria-label="Release model">Release</button>
-        </div>
-        <div class="row small">
-          <select id="perf_mode" aria-label="Performance mode">
-            <option value="LATENCY">Latency</option>
-            <option value="THROUGHPUT">Throughput</option>
-          </select>
-          <input id="npu_streams" type="number" min="1" value="1" placeholder="NPU streams" aria-label="NPU streams">
-          <button id="btn_wizard" aria-label="Config Wizard">Wizard</button>
-        </div>
-        <div id="alert" class="alert" style="display:none"><span class="icon" aria-hidden="true">⚠️</span><div id="alert_msg" role="alert"></div></div>
-        <div class="row">
-          <input id="chat_search" class="grow" placeholder="Search history" aria-label="Search history">
-        </div>
-        <div id="chat_msgs" class="chat" role="log" aria-live="polite"></div>
-        <textarea id="prompt" placeholder="Type your question" rows="4" aria-label="Prompt"></textarea>
-        <div class="row">
-          <div class="field"><input id="max_new" type="number" value="2048" min="1" aria-label="Max new tokens"><span class="help" data-tooltip="生成的新Token数量"></span></div>
-          <div class="field"><input id="temperature" type="number" value="0.7" step="0.1" aria-label="Temperature"><span class="help" data-tooltip="随机性，0-1 范围"></span></div>
-          <div class="field"><input id="top_k" type="number" value="50" min="1" aria-label="Top K"><span class="help" data-tooltip="采样时考虑的前K个"></span></div>
-          <div class="field"><input id="top_p" type="number" value="0.9" step="0.1" aria-label="Top P"><span class="help" data-tooltip="采样时累计概率阈值"></span></div>
-          <div class="field"><input id="rep_penalty" type="number" value="1.1" step="0.1" aria-label="Repetition penalty"><span class="help" data-tooltip="重复惩罚"></span></div>
-          <button id="btn_generate" data-i18n="generate" aria-label="Generate">Generate</button>
+    
+    <main>
+      <section id="page_chat" class="page">
+        <div class="chat-layout">
+          <section class="card chat-main">
+            <div class="row">
+              <select id="model_select" class="grow" aria-label="Model"></select>
+            </div>
+            <div id="no_models_hint" class="hint" style="display:none"><span data-i18n="no_models_hint">在模型管理中下载模型</span> · <a href="#models" data-page="models" data-i18n="goto_models">前往模型管理</a></div>
+            <div id="alert" class="alert" style="display:none"><span class="icon" aria-hidden="true">⚠️</span><div id="alert_msg" role="alert"></div></div>
+            <div id="chat_msgs" class="chat" role="log" aria-live="polite"></div>
+            <div class="chat-input">
+              <textarea id="prompt" placeholder="输入你的问题" rows="4" aria-label="Prompt"></textarea>
+              <div class="row">
+                <button id="btn_generate" data-i18n="generate" aria-label="Generate">发送</button>
+              </div>
+              <div class="row">
+                <input id="chat_search" class="grow" placeholder="搜索历史（预留）" aria-label="Search history">
+              </div>
+            </div>
+          </section>
+          <aside class="card chat-side" id="thinking_card">
+            <div class="card-header">
+              <h2>Thinking</h2>
+              <button id="think_toggle" aria-label="Toggle">▾</button>
+            </div>
+            <div id="thinking_content" class="output"></div>
+            <div id="thinking_summary" class="output" style="display:none"></div>
+          <div class="card-actions">
+            <button id="think_copy" aria-label="Copy">复制</button>
+          </div>
+          <div class="foot" id="sys_hw"></div>
+          <div class="foot" id="sys_load"></div>
+        </aside>
         </div>
       </section>
-      <section class="card" id="perf_card">
-        <h2>Performance</h2>
-        <div id="perf"></div>
+      <section id="page_models" class="page">
+        <section class="card">
+          <h2>模型管理</h2>
+          <div class="row">
+            <input id="model_id" placeholder="modelscope id" class="grow" value="qwen/Qwen2.5-0.5B-Instruct">
+            <button id="btn_download">下载</button>
+            <button id="btn_dl_quant_int8">下载+INT8量化</button>
+          </div>
+          <div class="row small">
+            <input id="include" placeholder="include patterns">
+            <input id="exclude" placeholder="exclude patterns">
+            <input id="revision" placeholder="revision">
+          </div>
+          <div id="download_status"></div>
+        </section>
+        <section class="card">
+          <div class="row">
+            <button id="btn_quant_int8">INT8量化</button>
+            <button id="btn_quant_int4">INT4量化</button>
+            <button id="btn_release">释放模型</button>
+          </div>
+          <div class="list" id="model_list"></div>
+        </section>
       </section>
+      <section id="page_settings" class="page">
+        <section class="card">
+          <h2>系统配置</h2>
+          <div class="row small">
+            <select id="perf_mode" aria-label="Performance mode">
+              <option value="LATENCY">Latency</option>
+              <option value="THROUGHPUT">Throughput</option>
+              <option value="CUMULATIVE_THROUGHPUT">Cumulative Throughput</option>
+            </select>
+            <button id="btn_wizard" aria-label="Config Wizard">向导</button>
+          </div>
+          <div class="row small">
+            <label><input type="checkbox" id="auto_perf"> 自动性能优化</label>
+            <label><input type="checkbox" id="auto_multi"> 自动协同切换</label>
+          </div>
+        </section>
+        <section class="card" id="advanced_card">
+          <div class="card-header">
+            <h2>高级设置</h2>
+            <button id="adv_toggle" aria-label="Toggle">▾</button>
+          </div>
+          <div class="card-body" id="advanced_body">
+            <div class="fieldgroup">
+              <label for="streams_control">Streams</label>
+              <div id="streams_control" class="segmented" role="group" aria-label="Streams">
+                <button data-value="1">1</button>
+                <button data-value="2">2</button>
+                <button data-value="3">3</button>
+                <button data-value="4">4</button>
+              </div>
+            </div>
+            <div class="fieldgroup">
+              <label for="tiles_slider">Tiles</label>
+              <input id="tiles_slider" type="range" min="1" max="4" step="1" aria-label="Tiles">
+              <input id="tiles_value" type="number" min="1" max="4" aria-label="Tiles value">
+            </div>
+            <div class="fieldgroup">
+              <label for="num_requests">并发请求</label>
+              <input id="num_requests" type="number" min="1" value="1" aria-label="Num requests">
+            </div>
+            <div class="card-actions">
+              <button id="adv_reset">重置</button>
+            </div>
+          </div>
+        </section>
+        <section class="card">
+          <h2>设备与环境</h2>
+          <div class="fieldgroup">
+            <label>设备架构</label>
+            <div id="device_arch" class="list"></div>
+          </div>
+          <div class="fieldgroup">
+            <label>OpenVINO Hints</label>
+            <div id="ov_hints_view" class="foot"></div>
+          </div>
+        </section>
+        <section class="card">
+          <h2>性能</h2>
+          <div id="perf" class="foot"></div>
+        </section>
+      </section>
+        <section id="page_about" class="page">
+          <section class="card">
+            <h2 data-i18n="about_title">关于</h2>
+            <p data-i18n="about_intro">AI Funland 是基于 OpenVINO GenAI 的本地 AI 推理与模型管理界面，支持模型下载、INT8/INT4 权重量化、设备选择（CPU/GPU/NPU/NVIDIA）、性能调优，以及支持思考/最终答案拆分的自然聊天体验。</p>
+            <div class="sysinfo" id="sysinfo_about"></div>
+          </section>
+        </section>
     </main>
     <footer class="foot">
       <center><span>V0.0.2 Dev · 2025-11-20 · Powered by <a href="https://hellovm.com">HelloVM</a>  · <a href="https://github.com/hellovm/AI-Funland">Check on Github</a></span></center>

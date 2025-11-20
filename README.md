@@ -19,8 +19,11 @@ Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基�
 - 🎯 默认优先 Intel NPU+GPU 协同；首次加载自动预热，启用编译缓存（`OV_CACHE_DIR`），缩短 TTFT
 - 🧠 Intel Ultra NPU 优化：`OV_PERFORMANCE_HINT=LATENCY`、可调并行度 `streams`，低延迟优先
 - 🛡️ 友好错误提示：不兼容加速器与模型占用删除，前端弹窗与“释放模型”按钮
-- 💬 现代化 UI（Material 风格）：消息气泡与历史搜索、Tooltip/配置向导、三档响应式布局
-- 📈 性能面板与告警：`/api/perf` 监控延迟；NPU 低于 CPU 自动提示；系统信息“当前加速器”不重复显示
+- 🎛️ 高级设置面板：`streams/tiles/num_requests`，实时保存与重置
+- 💬 分屏聊天布局：40% 输入 / 60% 结果，独立滚动与拖拽分隔
+- 🧠 Thinking 卡片：折叠/展开、摘要与复制
+- 🎨 现代化 UI（Material Design 3 + 动态色彩）：消息气泡、历史搜索、配置向导、响应式布局
+- 📈 性能面板与告警：`/api/perf` 监控延迟，展示 TTFT/TPOT/Throughput；系统信息显示库版本
 - 🚀 一键启动 `start.bat`，无需 Node.js；项目缓存：`tmp/`（可用 `AIFUNLAND_CACHE_DIR` 定制）
 - 🧱 模块化架构，预留扩展接口（文生图/视频等）
 
@@ -37,6 +40,8 @@ Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基�
   - “系统正在初始化模型，这可能需要 1-2 分钟，请稍候...”
 - 实时下载进度：
   - 准确反映后端下载状态，避免仅显示“API”，支持不定进度到精确百分比的切换
+ - 分屏聊天布局：上方固定输入（约 40%）、下方结果浏览（约 60%），两区独立滚动，拖拽分隔条（20%–80%）
+ - Thinking 卡片：右上角折叠/展开、右下角一键复制；折叠显示摘要，展开显示完整过程
 
 ### 3) 硬件加速优化
 - 加速器选择优先级更新：
@@ -45,10 +50,16 @@ Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基�
   - 提供 NPU+GPU+CPU 与 NPU+GPU 混合计算选项，提升硬件利用率
 - NPU 推理效率优化：
   - 量化参数与并行度配置优化，优先低延迟模式（可调 `Latency/Throughput` 与 `streams`）
+ - 高级设置面板：`streams/tiles/num_requests` 前端实时保存，后端映射 OpenVINO/NPU 参数
 
 ### 4) 性能优化
 - NPU 推理效率专项优化，缩短响应时间与首帧时间（TTFT）
 - 前端界面响应速度优化与动画反馈统一，提升整体体验
+ - 增加 TTFT / TPOT / Throughput 指标展示；系统信息 API 显示库版本（Transformers/Optimum/OpenVINO/GenAI）
+
+### 5) 依赖升级
+- Transformers 升级至 `4.57.1`
+- Optimum OpenVINO 升级至 `2.0.0`
 
 版本状态：开发版（Dev）
 
@@ -112,13 +123,6 @@ Tips：如需自定义缓存目录，设置环境变量 `AIFUNLAND_CACHE_DIR`（
 - `models/` · 下载与量化后模型：`<org__model>`、`<org__model>_quant_int8`
 - `tmp/` · ModelScope 缓存（可用 `AIFUNLAND_CACHE_DIR` 自定义）
 
-## Troubleshooting / 常见问题
-
-- ModelScope 下载失败（`exit 1`）：组织名大小写问题，已自动回退与小写重试；必要时使用 API 下载。
-- 进度不显示：初期显示不定进度动画，解析到百分比后转为精确进度。
-- PyTorch ONNX 符号错误（`_attention_scale`）：已固定 `torch==2.4.1`，兼容 `optimum[openvino]==1.27.0`。
-- Tokenizer IR 缺失（`openvino_tokenizer.xml`）：量化后自动编译；推理加载时若缺失也会自动补齐。
-- 静态资源 404：已修正静态目录指向 `web/`，首页使用 `send_static_file('index.html')`。
 
 ## Roadmap / 未来更新计划
 
@@ -137,16 +141,15 @@ openvino==2025.3.0
 openvino-genai==2025.3.0.0
 openvino-tokenizers==2025.3.0.0
 langchain_community==0.3.29
-optimum[openvino]==1.27.0
+optimum-intel[openvino]==2.0.0
 modelscope==1.12.0
 torch==2.4.1
-transformers==4.42.4
+transformers==4.57.1
 ```
 
 ## Credits / 致谢
 
 - OpenVINO · OpenVINO GenAI · Optimum OpenVINO · ModelScope
-- Qwen2.5 系列模型（用于功能验证）
 
 ---
 

@@ -25,25 +25,49 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
         except Exception:
             pass
     import os
-    if device == "NPU" or ("NPU" in device):
-        os.environ.setdefault("OV_NUM_STREAMS", "1")
-    # enable compile cache to reduce first-time latency
     try:
         from pathlib import Path as _P
-        _cd = _P.cwd() / "tmp" / "ov_cache"
+        _base = os.environ.get("AIFUNLAND_CACHE_DIR") or str(_P.cwd() / "tmp")
+        _cd = _P(_base) / "ov_cache"
         _cd.mkdir(parents=True, exist_ok=True)
-        os.environ.setdefault("OV_CACHE_DIR", str(_cd))
+        os.environ["OV_CACHE_DIR"] = str(_cd)
     except Exception:
         pass
+    if config and (device == "NPU" or ("NPU" in device)):
+        try:
+            from openvino.runtime import Core as _Core
+            _core = _Core()
+            _devs = _core.available_devices
+            if config.get("auto_multi"):
+                if any(d.startswith("GPU") for d in _devs):
+                    device = "MULTI:NPU,GPU"
+                elif "CPU" in _devs:
+                    device = "MULTI:NPU,CPU"
+        except Exception:
+            pass
+    if device == "NPU" or ("NPU" in device):
+        os.environ.setdefault("OV_NUM_STREAMS", "1")
     import os
     # apply device-specific performance hints
     perf_mode = None
     if config:
         perf_mode = config.get("perf_mode")
+    if (perf_mode is None) or (str(perf_mode).upper() == "AUTO"):
+        try:
+            max_new = int(config.get("max_new_tokens")) if config and (config.get("max_new_tokens") is not None) else 512
+            num_req = int(config.get("num_requests")) if config and (config.get("num_requests") is not None) else 1
+            perf_mode = "THROUGHPUT" if (max_new >= 512 or num_req > 1) else "LATENCY"
+        except Exception:
+            perf_mode = "LATENCY"
     if device == "NPU" or ("NPU" in device):
         streams = None
         if config:
             streams = config.get("npu_streams")
+        tiles = None
+        num_req = None
+        if config:
+            tiles = config.get("npu_tiles")
+            num_req = config.get("num_requests")
         if streams:
             os.environ["OV_NUM_STREAMS"] = str(streams)
         else:
@@ -57,6 +81,34 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
             os.environ.setdefault("NPU_COMPILATION_MODE_PARAMS", f"optimization-level=2 performance-hint-override={ov_mode}")
             os.environ.setdefault("NPU_TURBO", "YES")
             os.environ.setdefault("NPU_COMPILER_DYNAMIC_QUANTIZATION", "YES")
+            # prefer sequential in latency mode, allow concurrency in throughput mode
+            os.environ.setdefault("NPU_RUN_INFERENCES_SEQUENTIALLY", "YES" if ov_mode == "latency" else "NO")
+            if tiles:
+                os.environ["NPU_TILES"] = str(tiles)
+            if num_req:
+                os.environ["OV_HINT_NUM_REQUESTS"] = str(num_req)
+            # detect NPU architecture to set tiles and num_requests
+            try:
+                from openvino.runtime import Core
+                core = Core()
+                arch = core.get_property("NPU", "DEVICE_ARCHITECTURE")
+                arch_s = str(arch).lower()
+                if "4000" in arch_s:
+                    os.environ.setdefault("NPU_TILES", "4")
+                    if perf_mode in ("THROUGHPUT", "CUMULATIVE_THROUGHPUT"):
+                        os.environ.setdefault("OV_HINT_NUM_REQUESTS", "8")
+                    else:
+                        os.environ.setdefault("OV_HINT_NUM_REQUESTS", "1")
+                else:
+                    os.environ.setdefault("NPU_TILES", "2")
+                    if perf_mode in ("THROUGHPUT", "CUMULATIVE_THROUGHPUT"):
+                        os.environ.setdefault("OV_HINT_NUM_REQUESTS", "4")
+                    else:
+                        os.environ.setdefault("OV_HINT_NUM_REQUESTS", "1")
+            except Exception:
+                # fallback num_requests for unknown arch
+                os.environ.setdefault("OV_HINT_NUM_REQUESTS", "1" if ov_mode == "latency" else "4")
+            os.environ.setdefault("OV_ENABLE_PROFILING", "YES")
         except Exception:
             pass
     elif device == "GPU" or ("GPU" in device):
@@ -84,7 +136,15 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
                 os.environ.setdefault("MULTI_DEVICE_PRIORITIES", devs)
                 if perf_mode in ("CUMULATIVE_THROUGHPUT", "THROUGHPUT"):
                     os.environ.setdefault("OV_PERFORMANCE_HINT", perf_mode)
-                p = ov_genai.LLMPipeline(str(model_dir), f"MULTI:{devs}")
+                try:
+                    p = ov_genai.LLMPipeline(str(model_dir), f"MULTI:{devs}")
+                except Exception:
+                    os.environ.setdefault("AUTO_DEVICE_PRIORITY", devs)
+                    p = ov_genai.LLMPipeline(str(model_dir), f"AUTO:{devs}")
+            elif device.startswith("AUTO:"):
+                devs = device.split(":",1)[1]
+                os.environ.setdefault("AUTO_DEVICE_PRIORITY", devs)
+                p = ov_genai.LLMPipeline(str(model_dir), device)
             else:
                 p = ov_genai.LLMPipeline(str(model_dir), device)
         except Exception:
@@ -137,26 +197,33 @@ def generate(pipe, prompt: str, config: dict):
             gen.top_p = float(config["top_p"])
         if "repetition_penalty" in config:
             gen.repetition_penalty = float(config["repetition_penalty"])
-        return pipe.generate(prompt, gen)
-    return pipe.generate(prompt)
+        res = pipe.generate([prompt], gen)
+    else:
+        res = pipe.generate([prompt])
+    try:
+        text = res.text if hasattr(res, "text") else (res[0] if isinstance(res, (list, tuple)) and len(res)>0 else str(res))
+    except Exception:
+        text = str(res)
+    metrics = None
+    try:
+        pm = getattr(res, "perf_metrics", None)
+        if pm is not None:
+            metrics = {
+                "generate_ms": float(getattr(pm.get_generate_duration(), "mean", None) or 0.0),
+                "ttft_ms": float(getattr(pm.get_ttft(), "mean", None) or 0.0),
+                "tpot_ms": float(getattr(pm.get_tpot(), "mean", None) or 0.0),
+                "throughput_tps": float(getattr(pm.get_throughput(), "mean", None) or 0.0),
+            }
+    except Exception:
+        metrics = None
+    return text, metrics
 
 def quantize_model(model_dir: Path, save_dir: Path, mode: str = "int8"):
     from optimum.intel.openvino import OVModelForCausalLM
-    from optimum.intel.openvino import OVWeightQuantizationConfig, OVQuantizationConfig
-    if mode == "int4":
-        qc = OVWeightQuantizationConfig(bits=4)
-        m = OVModelForCausalLM.from_pretrained(str(model_dir), quantization_config=qc)
-        m.save_pretrained(str(save_dir))
-        # fallthrough to tokenizer conversion
-        # return str(save_dir)
-    if mode == "int8":
-        qc = OVWeightQuantizationConfig(bits=8)
-        m = OVModelForCausalLM.from_pretrained(str(model_dir), quantization_config=qc)
-        m.save_pretrained(str(save_dir))
-        # fallthrough to tokenizer conversion
-        # return str(save_dir)
-    qc = OVQuantizationConfig(bits=8)
-    m = OVModelForCausalLM.from_pretrained(str(model_dir), quantization_config=qc)
+    from optimum.intel.openvino import OVWeightQuantizationConfig
+    bits = 4 if str(mode).lower() == "int4" else 8
+    qc = OVWeightQuantizationConfig(bits=bits)
+    m = OVModelForCausalLM.from_pretrained(str(model_dir), quantization_config=qc, trust_remote_code=True)
     m.save_pretrained(str(save_dir))
     # ensure tokenizer IR exists in save_dir by converting from source HF tokenizer
     try:
