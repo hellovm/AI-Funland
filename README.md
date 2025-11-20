@@ -173,33 +173,47 @@ transformers==4.57.1
 
 <div align="center">
   <a href="https://www.intel.com/content/www/us/en/developer/tools/openvino-toolkit/overview.html" title="OpenVINO" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/intel.svg" height="90" alt="OpenVINO" />
+    <img src="web/static/logos/vendor/openvino.png" height="36" alt="OpenVINO" />
   </a>
   ·
   <a href="https://github.com/openvinotoolkit/openvino.genai" title="OpenVINO GenAI" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/openvino-genai.svg" height="90" alt="OpenVINO GenAI" />
+    <img src="web/static/logos/vendor/openvino-genai.png" height="36" alt="OpenVINO GenAI" />
   </a>
   ·
   <a href="https://huggingface.co/docs/optimum/main/en/intel/openvino" title="Optimum-Intel" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/optimum-intel.svg" height="90" alt="Optimum-Intel" />
+    <img src="web/static/logos/vendor/optimum-intel.png" height="36" alt="Optimum-Intel" />
   </a>
   ·
   <a href="https://modelscope.cn" title="ModelScope" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/modelscope.svg" height="90" alt="ModelScope" />
+    <img src="web/static/logos/vendor/modelscope.png" height="36" alt="ModelScope" />
   </a>
   ·
   <a href="https://huggingface.co/docs/transformers/index" title="Transformers" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/transformers.svg" height="90" alt="Transformers" />
+    <img src="web/static/logos/vendor/transformers.png" height="36" alt="Transformers" />
   </a>
   ·
   <a href="https://flask.palletsprojects.com" title="Flask" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/flask.svg" height="90" alt="Flask" />
+    <img src="web/static/logos/vendor/flask.png" height="36" alt="Flask" />
   </a>
   ·
   <a href="https://www.python.org/" title="Python" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/python.svg" height="90" alt="Python" />
+    <img src="web/static/logos/vendor/python.png" height="36" alt="Python" />
   </a>
 </div>
+
+## 系统硬件配置建议 / Hardware Recommendations
+
+- 入门轻薄本（可用）：`Intel Core Ultra`（带 `NPU`），`16GB RAM`，`NVMe SSD`
+- 推荐配置：`Intel Core Ultra` + `NPU`，`32GB RAM`，`NVMe SSD`，`Intel GPU`（集显或 Arc）
+- 进阶协同：启用 `MULTI:NPU,GPU`，在长序列与多请求场景提升吞吐
+- 操作系统：`Windows 11` 或 `Linux`（建议较新内核与驱动）
+- Python 与库：`Python 3.10+`，`openvino`、`openvino-genai`、`optimum-intel`、`transformers`
+- 性能调优建议：
+  - 短问答低时延：`OV_PERFORMANCE_HINT=LATENCY`，`OV_NUM_STREAMS=1`
+  - 长文本与批量吞吐：`OV_PERFORMANCE_HINT=THROUGHPUT` 或 `CUMULATIVE_THROUGHPUT`
+  - 并行请求：根据负载设置 `OV_HINT_NUM_REQUESTS`（如 `2–4`），避免饱和
+  - NPU 贴片/并行度：视设备设置 `NPU_TILES`（如 `2`），在 `SSE` 流式下提升体感速度
+  - 前端“高级设置”支持 `Streams/Tiles/并发请求` 可视化微调
 
 ---
 

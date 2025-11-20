@@ -168,6 +168,20 @@ def _run_modelscope_download(task_id, model_id, local_dir, include=None, exclude
                     shutil.move(str(src), str(local_dir))
                 t = threading.Thread(target=_run_api, daemon=True)
                 t.start()
+                def _monitor_progress():
+                    import time
+                    pct = 3
+                    while t.is_alive():
+                        try:
+                            task_store.update(task_id, status="running", progress=pct, message="api_download")
+                            pct = pct + 2 if pct < 40 else (pct + 3 if pct < 75 else (pct + 1))
+                            if pct > 95:
+                                pct = 95
+                        except Exception:
+                            pass
+                        time.sleep(1)
+                mon = threading.Thread(target=_monitor_progress, daemon=True)
+                mon.start()
                 t.join()
                 task_store.complete(task_id, result=str(local_dir))
             except Exception as e2:
