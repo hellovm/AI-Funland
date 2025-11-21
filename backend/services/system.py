@@ -27,6 +27,73 @@ def _openvino_devices():
     except Exception:
         return []
 
+def _cpu_model():
+    try:
+        if platform.system() == "Windows":
+            out = subprocess.check_output(["wmic", "cpu", "get", "Name"], stderr=subprocess.STDOUT, shell=True, text=True)
+            for ln in out.splitlines():
+                s = ln.strip()
+                if not s or s.lower().startswith("name"):
+                    continue
+                return s
+        elif platform.system() == "Linux":
+            try:
+                with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if "model name" in line:
+                            return line.split(":", 1)[1].strip()
+            except Exception:
+                pass
+        return platform.processor() or platform.machine()
+    except Exception:
+        return platform.processor() or platform.machine()
+
+def _windows_video_controllers():
+    try:
+        out = subprocess.check_output(["wmic", "path", "Win32_VideoController", "get", "Name"], stderr=subprocess.STDOUT, shell=True, text=True)
+        names = []
+        for ln in out.splitlines():
+            s = ln.strip()
+            if not s or s.lower().startswith("name"):
+                continue
+            names.append(s)
+        return names
+    except Exception:
+        return []
+
+def _memory_info():
+    try:
+        import ctypes
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+        stat = MEMORYSTATUSEX()
+        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        ok = ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+        if ok:
+            total = int(stat.ullTotalPhys)
+            avail = int(stat.ullAvailPhys)
+            used = total - avail
+            perc = float(stat.dwMemoryLoad)
+            return {"total_bytes": total, "available_bytes": avail, "used_bytes": used, "used_percent": perc}
+    except Exception:
+        pass
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        return {"total_bytes": int(vm.total), "available_bytes": int(vm.available), "used_bytes": int(vm.used), "used_percent": float(vm.percent)}
+    except Exception:
+        return None
+
 def get_info():
     devices = _openvino_devices()
     nvidia = _nvidia_info()
@@ -38,18 +105,16 @@ def get_info():
         accelerators.append({"id": "NPU", "label": "Intel NPU"})
     if has_gpu:
         accelerators.append({"id": "GPU", "label": "Intel GPU"})
-    if has_cpu:
-        accelerators.append({"id": "CPU", "label": "CPU"})
-    if nvidia:
-        accelerators.append({"id": "NVIDIA", "label": "NVIDIA GPU"})
     # cooperative acceleration options
     combos = []
-    if has_npu and has_gpu:
-        combos.append({"id": "MULTI:NPU,GPU", "label": "Intel NPU+GPU (协同)"})
-    if has_npu and has_cpu:
-        combos.append({"id": "MULTI:NPU,CPU", "label": "Intel NPU+CPU (协同)"})
     if has_npu and has_gpu and has_cpu:
-        combos.append({"id": "MULTI:NPU,GPU,CPU", "label": "Intel NPU+GPU+CPU (协同)"})
+        combos.append({"id": "HETERO:NPU,GPU,CPU", "label": "Intel NPU+Intel GPU+Intel CPU（异构）"})
+        combos.append({"id": "HETERO:NPU,CPU", "label": "Intel NPU+Intel CPU（异构）"})
+        combos.append({"id": "HETERO:GPU,CPU", "label": "Intel GPU+Intel CPU（异构）"})
+    elif has_npu and has_cpu:
+        combos.append({"id": "HETERO:NPU,CPU", "label": "Intel NPU+Intel CPU（异构）"})
+    elif has_gpu and has_cpu:
+        combos.append({"id": "HETERO:GPU,CPU", "label": "Intel GPU+Intel CPU（异构）"})
     accelerators = combos + accelerators
     # library versions
     tv = None
@@ -108,6 +173,12 @@ def get_info():
                 arch["GPU"] = str(a)
             except Exception:
                 pass
+        try:
+            full_gpu = _c.get_property("GPU", "FULL_DEVICE_NAME")
+            if isinstance(full_gpu, (str, bytes)):
+                arch["GPU_FULL_NAME"] = str(full_gpu)
+        except Exception:
+            pass
     except Exception:
         pass
     import os as _os
@@ -117,6 +188,31 @@ def get_info():
         "OV_HINT_NUM_REQUESTS": _os.environ.get("OV_HINT_NUM_REQUESTS"),
         "NPU_TILES": _os.environ.get("NPU_TILES"),
     }
+    try:
+        from openvino.runtime import Core as _Core
+        _hc = _Core()
+        try:
+            hp = _hc.get_property("HETERO", "MULTI_DEVICE_PRIORITIES")
+            hints["HETERO_PRIORITIES"] = hp
+        except Exception:
+            pass
+        try:
+            pol = _hc.get_property("HETERO", "MODEL_DISTRIBUTION_POLICY")
+            hints["HETERO_MODEL_DISTRIBUTION_POLICY"] = str(pol)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    cpu_model = _cpu_model()
+    vc = _windows_video_controllers() if platform.system() == "Windows" else []
+    vc_intel = [n for n in vc if ("intel" in n.lower()) or ("arc" in n.lower())]
+    hw_models = {
+        "cpu": cpu_model,
+        "npu": arch.get("NPU"),
+        "gpu": vc_intel or ([arch.get("GPU_FULL_NAME")] if arch.get("GPU_FULL_NAME") else ([] if not arch.get("GPU") else [arch.get("GPU")])),
+        "nvidia": [g.get("name") for g in nvidia] if nvidia else [],
+    }
+    mem = _memory_info()
     return {
         "os": platform.system(),
         "os_version": platform.version(),
@@ -130,6 +226,8 @@ def get_info():
         "cwd": str(Path.cwd()),
         "device_architecture": arch,
         "ov_hints": hints,
+        "hardware_models": hw_models,
+        "memory": mem,
         "library_versions": {
             "transformers": tv,
             "optimum": optv,

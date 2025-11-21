@@ -9,6 +9,12 @@ from flask import request, jsonify, send_from_directory
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+import warnings
+try:
+    from torch.onnx import TracerWarning
+    warnings.filterwarnings("ignore", category=TracerWarning)
+except Exception:
+    pass
 from backend.services.system import get_info
 from backend.services.models import list_models, delete_model, models_root
 from backend.services.inference import load_pipeline, generate, quantize_model, is_model_in_use, release_model, is_model_loaded
@@ -17,7 +23,7 @@ from backend.utils.tasks import task_store
 BASE_DIR = Path(__file__).resolve().parents[1]
 MODELS_DIR = models_root(BASE_DIR)
 PERF = {"lat": {"CPU": [], "GPU": [], "NPU": [], "NVIDIA": []}, "ttft": {"CPU": [], "GPU": [], "NPU": [], "NVIDIA": []}, "tpot": {"CPU": [], "GPU": [], "NPU": [], "NVIDIA": []}, "throughput": {"CPU": [], "GPU": [], "NPU": [], "NVIDIA": []}, "gen": {"CPU": [], "GPU": [], "NPU": [], "NVIDIA": []}, "last": {}, "warn": None}
-PMODE_STATE = {"CPU": {"mode": "LATENCY", "stable": 0}, "GPU": {"mode": "LATENCY", "stable": 0}, "NPU": {"mode": "LATENCY", "stable": 0}, "NVIDIA": {"mode": "LATENCY", "stable": 0}}
+PMODE_STATE = {"CPU": {"mode": "CUMULATIVE_THROUGHPUT", "stable": 0}, "GPU": {"mode": "CUMULATIVE_THROUGHPUT", "stable": 0}, "NPU": {"mode": "CUMULATIVE_THROUGHPUT", "stable": 0}, "NVIDIA": {"mode": "CUMULATIVE_THROUGHPUT", "stable": 0}}
 
 def _choose_perf_mode(config, device):
     key = device if device in PERF["lat"] else ("NPU" if "NPU" in device else ("GPU" if "GPU" in device else ("CPU" if "CPU" in device else "CPU")))
@@ -72,6 +78,44 @@ def index():
 @app.get("/api/system/info")
 def api_system_info():
     return jsonify(get_info())
+
+def _pick_default_model_id():
+    import os
+    env_id = os.environ.get("AIFUNLAND_DEFAULT_MODEL_ID")
+    if env_id:
+        return env_id
+    items = list_models(BASE_DIR)
+    if not items:
+        return None
+    try:
+        items.sort(key=lambda x: ((1 if ("_quant_int8" in str(x.get("id"))) else 0), int(x.get("size_bytes") or 0)), reverse=True)
+    except Exception:
+        pass
+    return items[0]["id"] if items else None
+
+def _preload_on_start():
+    try:
+        import os
+        mid = _pick_default_model_id()
+        if not mid:
+            return
+        dev = os.environ.get("AIFUNLAND_DEFAULT_DEVICE") or "HETERO:NPU,GPU,CPU"
+        cfg = {"perf_mode": "LATENCY", "hetero_enable": True, "max_prompt_len": 512, "min_response_len": 8}
+        model_dir = MODELS_DIR / mid
+        def _bg():
+            try:
+                pipe = load_pipeline(model_dir, dev, cfg)
+                try:
+                    g2 = pipe.get_generation_config()
+                    g2.max_new_tokens = 1
+                    _ = pipe.generate("warmup", g2)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        threading.Thread(target=_bg, daemon=True).start()
+    except Exception:
+        pass
 
 @app.get("/api/models/list")
 def api_models_list():
@@ -230,6 +274,7 @@ def api_models_quantize():
     data = request.get_json(force=True)
     model_id = data.get("model_id")
     mode = data.get("mode", "int8")
+    params = data.get("params")
     if not model_id:
         return jsonify({"error": "model_id required"}), 400
     src = MODELS_DIR / model_id.replace("/", "__")
@@ -242,7 +287,7 @@ def api_models_quantize():
     def _run():
         task_store.update(task_id, status="running", message="quantizing")
         try:
-            result = quantize_model(src, out, mode)
+            result = quantize_model(src, out, mode, params)
             try:
                 release_model(src)
             except Exception:
@@ -255,8 +300,12 @@ def api_models_quantize():
             task_store.complete(task_id, result=result)
         except Exception as e:
             msg = str(e)
+            if "int4_disabled" in msg:
+                msg = "系统已禁用 INT4 量化。仅支持 INT8 作为默认方案。"
             if ("does not recognize this architecture" in msg) or ("model type" in msg and "qwen3" in msg.lower()):
                 msg = "当前模型架构(qwen3)不受当前 Transformers/Optimum 版本支持，建议：1) 升级 Transformers/Optimum 至支持 qwen3 的版本 2) 更换为兼容模型 (如 qwen/Qwen2.5-0.5B/1.5B/3B-Instruct)。"
+            if ("Calibration dataset is required" in msg) or ("requires dataset" in msg):
+                msg = "当前量化策略需要校准数据或数据感知选项，请提供 dataset 或选择仅权重量化（INT8）。"
             task_store.update(task_id, status="error", error=msg)
 
     threading.Thread(target=_run, daemon=True).start()
@@ -304,6 +353,8 @@ def api_infer_chat():
     device = data.get("device", "CPU")
     prompt = data.get("prompt")
     config = data.get("config", {})
+    if "hetero_enable" not in config:
+        config["hetero_enable"] = True
     if not model_id or not prompt:
         return jsonify({"error": "model_id and prompt required"}), 400
     model_dir = MODELS_DIR / model_id.replace("/", "__")
@@ -314,16 +365,42 @@ def api_infer_chat():
         t0 = time.time()
         if str(config.get("perf_mode", "")).upper() == "AUTO":
             config["perf_mode"] = _choose_perf_mode(config, device)
+        if config.get("web_search"):
+            try:
+                from backend.services.inference import web_search, augment_with_sources
+                q = config.get("search_query") or prompt
+                sources = web_search(q, max_results=5)
+                prompt = augment_with_sources(prompt, sources, lang="zh")
+            except Exception:
+                pass
         pipe = load_pipeline(model_dir, device, config)
+        cur_dev = getattr(pipe, "_af_device", device)
+        cur_real = getattr(pipe, "_af_device_real", cur_dev)
+        cur_real = getattr(pipe, "_af_device_real", cur_dev)
+        cur_real = getattr(pipe, "_af_device_real", cur_dev)
         output, metrics = generate(pipe, prompt, config)
+        try:
+            s = str(output)
+            p = s.lower().find("</think>")
+            if p != -1:
+                output = s[p+8:].strip()
+        except Exception:
+            pass
         dt = int((time.time() - t0) * 1000)
-        key = device if device in PERF["lat"] else ("NPU" if "NPU" in device else ("GPU" if "GPU" in device else ("CPU" if "CPU" in device else None)))
+        key = cur_dev if cur_dev in PERF["lat"] else ("NPU" if "NPU" in cur_dev else ("GPU" if "GPU" in cur_dev else ("CPU" if "CPU" in cur_dev else None)))
         arr = PERF["lat"].get(key)
         if arr is not None:
             arr.append(dt)
             if len(arr) > 30:
                 del arr[:len(arr)-30]
-        PERF["last"] = {"device": device, "latency_ms": dt, "metrics": metrics}
+        fb = False
+        try:
+            sd = str(cur_dev)
+            sr = str(cur_real)
+            fb = (sd.startswith("HETERO") and (not sr.startswith("HETERO"))) and (sd != sr)
+        except Exception:
+            fb = False
+        PERF["last"] = {"device": cur_dev, "real_device": cur_real, "fallback": fb, "latency_ms": dt, "metrics": metrics}
         if metrics and key:
             try:
                 if metrics.get("ttft_ms"):
@@ -347,6 +424,20 @@ def api_infer_chat():
         return jsonify({"output": output, "metrics": metrics})
     except Exception as e:
         msg = str(e)
+        if ("No more devices are left" in msg) or ("Failed to compile" in msg and "devices" in msg):
+            return jsonify({
+                "error_code": "npu_no_device_left",
+                "friendly": True,
+                "message": "NPU 编译失败或设备不可用。建议：1) 在设置页将 Streams/并发请求设为 1 2) 关闭协同或改用 GPU 3) 点击‘释放模型’后重试 4) 更新 Intel NPU 驱动与 OpenVINO 版本",
+                "recommended": [
+                    "设置 OV_NUM_STREAMS=1",
+                    "设置 OV_HINT_NUM_REQUESTS=1",
+                    "切换设备为 GPU 或 CPU",
+                    "使用 MULTI:GPU,CPU",
+                    "释放模型后重试"
+                ],
+                "device": device
+            }), 200
         if ("does not recognize this architecture" in msg) or ("model type" in msg and "qwen3" in msg.lower()):
             return jsonify({
                 "error_code": "unsupported_architecture",
@@ -379,11 +470,26 @@ def api_infer_preload():
     model_dir = MODELS_DIR / model_id.replace("/", "__")
     if not model_dir.exists():
         return jsonify({"error": "model_not_found"}), 404
-    try:
-        _ = load_pipeline(model_dir, device, data.get("config", {}))
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    cfg = data.get("config", {})
+    if str(cfg.get("perf_mode", "")).upper() == "AUTO":
+        try:
+            cfg["perf_mode"] = _choose_perf_mode(cfg, device)
+        except Exception:
+            pass
+    def _bg():
+        try:
+            pipe = load_pipeline(model_dir, device, cfg)
+            try:
+                g2 = pipe.get_generation_config()
+                g2.max_new_tokens = 1
+                _ = pipe.generate("warmup", g2)
+            except Exception:
+                pass
+        except Exception:
+            pass
+    t = threading.Thread(target=_bg, daemon=True)
+    t.start()
+    return jsonify({"ok": True, "async": True})
 @app.get("/api/infer/stream")
 def api_infer_stream():
     model_id = request.args.get("model_id")
@@ -394,6 +500,8 @@ def api_infer_stream():
         config = json.loads(cfg_s) if cfg_s else {}
     except Exception:
         config = {}
+    if "hetero_enable" not in config:
+        config["hetero_enable"] = True
     if not model_id or not prompt:
         def _err():
             yield "event: error\n"
@@ -406,33 +514,130 @@ def api_infer_stream():
             yield "data: {\"error\": \"model_not_found\"}\n\n"
         return app.response_class(_err2(), mimetype="text/event-stream")
     def _gen():
-        import time
+        import time, queue, threading
         yield "event: start\n"
         yield "data: {}\n\n"
         t0 = time.time()
         if str(config.get("perf_mode", "")).upper() == "AUTO":
             config["perf_mode"] = _choose_perf_mode(config, device)
         pipe = load_pipeline(model_dir, device, config)
-        output, metrics = generate(pipe, prompt, config)
+        cur_dev = getattr(pipe, "_af_device", device)
+        q = queue.Queue()
+        buf = []
+        done = {"v": False}
+        first = {"t": None}
+        gate = {"open": False, "buf": ""}
+        def sink(x):
+            try:
+                xs = str(x)
+                if not gate["open"]:
+                    gate["buf"] += xs
+                    s = gate["buf"].lower()
+                    k = s.find("</think>")
+                    if k != -1:
+                        gate["open"] = True
+                        post = gate["buf"][k+8:]
+                        gate["buf"] = ""
+                        if first["t"] is None:
+                            first["t"] = time.time()
+                        if post:
+                            q.put(post)
+                else:
+                    if first["t"] is None:
+                        first["t"] = time.time()
+                    q.put(xs)
+            except Exception:
+                pass
+        def streamer(subword):
+            try:
+                sink(subword)
+            except Exception:
+                pass
+            import openvino_genai as ov_genai
+            return ov_genai.StreamingStatus.RUNNING
+        out = {"text": None, "metrics": None}
+        sources = None
+        if config.get("web_search"):
+            try:
+                from backend.services.inference import web_search, augment_with_sources
+                qtext = config.get("search_query") or prompt
+                sources = web_search(qtext, max_results=5)
+                try:
+                    yield "event: sources\n"
+                    yield "data: " + json.dumps({"sources": sources}) + "\n\n"
+                except Exception:
+                    pass
+                prompt_aug = augment_with_sources(prompt, sources, lang="zh")
+            except Exception:
+                prompt_aug = prompt
+        else:
+            prompt_aug = prompt
+        def run_gen():
+            try:
+                from backend.services.inference import generate_stream
+                text, metrics = generate_stream(pipe, prompt_aug, config, streamer)
+                out["text"] = text
+                out["metrics"] = metrics
+            except Exception:
+                out["text"] = ""
+                out["metrics"] = None
+            finally:
+                done["v"] = True
+                try:
+                    q.put(None)
+                except Exception:
+                    pass
+        th = threading.Thread(target=run_gen, daemon=True)
+        th.start()
+        key = cur_dev if cur_dev in PERF["lat"] else ("NPU" if "NPU" in cur_dev else ("GPU" if "GPU" in cur_dev else ("CPU" if "CPU" in cur_dev else None)))
+        while True:
+            try:
+                item = q.get(timeout=0.2)
+            except Exception:
+                item = None
+            if item is None:
+                if done["v"]:
+                    break
+                else:
+                    continue
+            try:
+                buf.append(item)
+                yield "event: token\n"
+                yield "data: " + json.dumps({"text": item}) + "\n\n"
+            except Exception:
+                pass
         dt = int((time.time() - t0) * 1000)
-        key = device if device in PERF["lat"] else ("NPU" if "NPU" in device else ("GPU" if "GPU" in device else ("CPU" if "CPU" in device else None)))
         arr = PERF["lat"].get(key)
         if arr is not None:
             arr.append(dt)
             if len(arr) > 30:
                 del arr[:len(arr)-30]
-        PERF["last"] = {"device": device, "latency_ms": dt, "metrics": metrics}
+        metrics = out["metrics"]
+        if first["t"] is not None and key:
+            try:
+                ttft_ms = float((first["t"] - t0) * 1000.0)
+                PERF["ttft"][key].append(ttft_ms)
+                if len(PERF["ttft"][key]) > 30:
+                    del PERF["ttft"][key][:len(PERF["ttft"][key])-30]
+            except Exception:
+                pass
+        fb = False
+        try:
+            sd = str(cur_dev)
+            sr = str(cur_real)
+            fb = (sd.startswith("HETERO") and (not sr.startswith("HETERO"))) and (sd != sr)
+        except Exception:
+            fb = False
+        PERF["last"] = {"device": cur_dev, "real_device": cur_real, "fallback": fb, "latency_ms": dt, "metrics": metrics}
         if metrics and key:
             try:
-                if metrics.get("ttft_ms"):
-                    PERF["ttft"][key].append(metrics["ttft_ms"]) 
                 if metrics.get("tpot_ms"):
                     PERF["tpot"][key].append(metrics["tpot_ms"]) 
                 if metrics.get("throughput_tps"):
                     PERF["throughput"][key].append(metrics["throughput_tps"]) 
                 if metrics.get("generate_ms"):
                     PERF["gen"][key].append(metrics["generate_ms"]) 
-                for k in ("ttft","tpot","throughput","gen"):
+                for k in ("tpot","throughput","gen"):
                     if len(PERF[k][key]) > 30:
                         del PERF[k][key][:len(PERF[k][key])-30]
             except Exception:
@@ -442,15 +647,15 @@ def api_infer_stream():
         PERF["warn"] = None
         if (device == "NPU" or ("NPU" in device)) and cpu_avg is not None and npu_avg is not None and npu_avg > cpu_avg * 1.2:
             PERF["warn"] = "npu_slower_than_cpu"
-        s = str(output or "")
+        s = out["text"] or "" 
         try:
-            step = 80
-            i = 0
-            while i < len(s):
-                seg = s[i:i+step]
-                yield "event: chunk\n"
-                yield "data: " + json.dumps({"text": seg}) + "\n\n"
-                i += step
+            ss = str(s)
+            pp = ss.lower().find("</think>")
+            if pp != -1:
+                s = ss[pp+8:].strip()
+        except Exception:
+            pass
+        try:
             yield "event: final\n"
             yield "data: " + json.dumps({"text": s, "metrics": metrics}) + "\n\n"
         except Exception:
@@ -461,6 +666,53 @@ def api_infer_stream():
 def api_perf():
     def avg(a):
         return float(sum(a)/len(a)) if a else None
+    usage = {}
+    try:
+        import psutil
+        usage["cpu_percent"] = float(psutil.cpu_percent(interval=0))
+    except Exception:
+        usage["cpu_percent"] = None
+    try:
+        from openvino.runtime import Core
+        c = Core()
+        try:
+            tot = c.get_property("NPU", "DEVICE_TOTAL_MEM_SIZE")
+            alloc = c.get_property("NPU", "DEVICE_ALLOC_MEM_SIZE")
+            usage["npu_mem_total"] = int(tot) if isinstance(tot, (int, float)) else None
+            usage["npu_mem_used"] = int(alloc) if isinstance(alloc, (int, float)) else None
+        except Exception:
+            pass
+        try:
+            gtot = c.get_property("GPU", "DEVICE_TOTAL_MEM_SIZE")
+            gallon = c.get_property("GPU", "DEVICE_ALLOC_MEM_SIZE")
+            usage["gpu_mem_total"] = int(gtot) if isinstance(gtot, (int, float)) else None
+            usage["gpu_mem_used"] = int(gallon) if isinstance(gallon, (int, float)) else None
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader"], stderr=subprocess.STDOUT, shell=True, text=True)
+        rows = []
+        for ln in out.strip().splitlines():
+            xs = [x.strip() for x in ln.split(",")]
+            if len(xs) >= 3:
+                rows.append({"util": xs[0], "mem_used": xs[1], "mem_total": xs[2]})
+        usage["nvidia"] = rows
+    except Exception:
+        pass
+    # derive hetero participation from memory usage percentages
+    hp = {}
+    try:
+        if isinstance(usage.get("gpu_mem_total"), int) and isinstance(usage.get("gpu_mem_used"), int) and usage["gpu_mem_total"] > 0:
+            hp["GPU"] = float(usage["gpu_mem_used"]) / float(usage["gpu_mem_total"]) * 100.0
+    except Exception:
+        pass
+    try:
+        if isinstance(usage.get("npu_mem_total"), int) and isinstance(usage.get("npu_mem_used"), int) and usage["npu_mem_total"] > 0:
+            hp["NPU"] = float(usage["npu_mem_used"]) / float(usage["npu_mem_total"]) * 100.0
+    except Exception:
+        pass
     return jsonify({
         "avg": {k: (int(avg(v)) if avg(v) is not None else None) for k, v in PERF["lat"].items()},
         "avg_details": {
@@ -470,10 +722,16 @@ def api_perf():
             "generate": {k: avg(v) for k, v in PERF["gen"].items()},
         },
         "last": PERF["last"],
-        "warn": PERF["warn"]
+        "warn": PERF["warn"],
+        "usage": usage,
+        "hetero_participation": hp
     })
 
 def run():
+    try:
+        _preload_on_start()
+    except Exception:
+        pass
     app.run(host="127.0.0.1", port=8000)
 
 if __name__ == "__main__":

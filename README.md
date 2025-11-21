@@ -2,10 +2,10 @@
 
 <h1>AI Funland 🎡🤖</h1>
 
-Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基于 OpenVINO 的本地 AI 问答平台，针对 Intel Ultra 系列 NPU 优化。
+<h2>Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基于 OpenVINO 的本地 AI 问答平台，针对 Intel Ultra 系列 NPU 优化。</h2>
 
 <p>
-📦 Version: <b>V0.0.2 Dev</b> · 🗓️ Release Date: <b>2025-11-20</b>
+📦 Version: <b>V0.0.3 Dev</b> · 🗓️ Release Date: <b>2025-11-21</b>
 </p>
 
 </div>
@@ -17,7 +17,7 @@ Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基�
 - 🧩 INT8/INT4 权重量化，量化完成自动清理原始模型，仅保留量化版本；Tokenizer IR 自动编译
 - 🖥️ 加速器选择：CPU · Intel GPU · Intel Ultra NPU · NVIDIA · 协同选项（NPU+GPU、NPU+GPU+CPU）
 - 🎯 默认优先 Intel NPU+GPU 协同；首次加载自动预热，启用编译缓存（`OV_CACHE_DIR`），缩短 TTFT
-- 🧠 Intel Ultra NPU 优化：`OV_PERFORMANCE_HINT=LATENCY`、可调并行度 `streams`，低延迟优先
+- 🧠 Intel Ultra NPU 优化：自动性能提示（Latency/Throughput/CumulativeThroughput），可调并行度 `streams`
 - 🛡️ 友好错误提示：不兼容加速器与模型占用删除，前端弹窗与“释放模型”按钮
 - 🎛️ 高级设置面板：`streams/tiles/num_requests`，实时保存与重置
 - 💬 分屏聊天布局：40% 输入 / 60% 结果，独立滚动与拖拽分隔
@@ -43,6 +43,24 @@ Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基�
 - 更好的电池续航：在移动设备上以更低能耗完成推理，延长工作时长。
 
 适用场景示例：本地问答助手、快速摘要/检索增强生成（RAG）终端、移动办公与演示、教育与科研设备、需要合规/隐私保护的行业应用等。
+
+## Release Notes · V0.0.3 Dev（2025/11/21）
+
+### 更新摘要（中文）
+- 继续优化 NPU 推理效率：调整 NPU 并发与性能提示，降低 TTFT 与提升吞吐
+- 优化前端页面：更友好的错误提示与交互，细节打磨（SSE、分屏、提示文案）
+- 增加 HETERO 集成：实现多硬件协同推理（NPU + iGPU/CPU），自动优选 iGPU，排除 NVIDIA 错用
+- 增加 DeepThink、联网搜索与上下文理解：支持 `<think>/<final>` 拆分、Web 搜索增强与上下文重组
+- 优化模型量化流程：INT8 量化完成后自动删除原始模型，仅保留量化版本；自动编译 Tokenizer IR
+- 修复多硬件协同模式下可能错误调用 NVIDIA 独立显卡的问题
+
+### Release Summary (English)
+- Further optimize NPU inference efficiency: tune concurrency and performance hints to reduce TTFT and improve throughput
+- User-friendly frontend: better error messages and interactions; refined SSE, split view and copy/summary UX
+- HETERO integration: multi-device cooperative inference (NPU + iGPU/CPU); auto-select Intel iGPU and exclude NVIDIA misuse
+- DeepThink, Web search, and context awareness: `<think>/<final>` separation, web-augmented responses, and prompt reconstruction
+- Streamlined quantization flow: delete original model after INT8 W8 quantization; auto compile tokenizer IR
+- Fix potential misuse of NVIDIA dGPU in multi-device cooperative mode
 
 ## Release Notes · V0.0.2 Dev（2025/11/20）
 
@@ -75,8 +93,10 @@ Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基�
  - 增加 TTFT / TPOT / Throughput 指标展示；系统信息 API 显示库版本（Transformers/Optimum/OpenVINO/GenAI）
 
 ### 5) 依赖升级
-- Transformers 升级至 `4.57.1`
-- Optimum OpenVINO 升级至 `2.0.0`
+- OpenVINO/GenAI 与 NPU 指南对齐：`openvino==2025.3.0`、`openvino-genai==2025.3.0.0`、`openvino-tokenizers==2025.3.0.0`
+- Transformers 固定为 `4.51.3`（与 OpenVINO 2025.3 强兼容）
+- Optimum-Intel（OpenVINO）固定为 `1.25.2`
+- 新增 `nncf==2.18.0` 与 `onnx==1.18.0`
 
 版本状态：开发版（Dev）
 
@@ -142,16 +162,6 @@ Tips：如需自定义缓存目录，设置环境变量 `AIFUNLAND_CACHE_DIR`（
 - `models/` · 下载与量化后模型：`<org__model>`、`<org__model>_quant_int8`
 - `tmp/` · ModelScope 缓存（可用 `AIFUNLAND_CACHE_DIR` 自定义）
 
-
-## Roadmap / 未来更新计划
-
-- 0.0.2 · 流式输出、对话历史、系统健康检查（端口/防火墙）
-- 0.1.x · 更强的设备自动选择与性能档位；更精细的量化策略（混合精度）
-- 0.2.x · 文生图 / 文生视频 / 图生视频 / 视频换脸等扩展模块
-- 0.3.x · 插件化架构、预训练模型管理、配置持久化与导入导出
-- 0.4.x · 跨平台打包（Windows/macOS/Linux）、离线安装包
-- 0.5.x · 测试完善（单测/集成测试）、CI/CD、错误可观测性与日志
-
 ## Dependencies / 依赖
 
 ```
@@ -160,11 +170,21 @@ openvino==2025.3.0
 openvino-genai==2025.3.0.0
 openvino-tokenizers==2025.3.0.0
 langchain_community==0.3.29
-optimum-intel[openvino]==2.0.0
+optimum-intel[openvino]==1.25.2
+nncf==2.18.0
+onnx==1.18.0
 modelscope==1.12.0
 torch==2.4.1
-transformers==4.57.1
+transformers==4.51.3
 ```
+
+## NNCF 权重量化（仅 INT8）
+
+- 当前项目仅支持 INT8 权重量化作为默认方案，兼容性与稳定性更好。
+- 建议在 NPU 场景中先使用 INT8 权重量化，以获得更低的内存占用与稳定的吞吐。
+- 资源提示：≥7B 且长提示（>1024 tokens）建议内存 >16GB。
+
+内置量化（API）在 `Models` 面板中提供 INT8，一键量化并保存到本地目录，后续可直接加载推理。
 
 ## Credits / 致谢
 
@@ -173,31 +193,31 @@ transformers==4.57.1
 
 <div align="center">
   <a href="https://www.intel.com/content/www/us/en/developer/tools/openvino-toolkit/overview.html" title="OpenVINO" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/vendor/openvino.png" height="36" alt="OpenVINO" />
+    <img src="web/static/logos/intel.jpeg" height="90" alt="OpenVINO" />
   </a>
   ·
   <a href="https://github.com/openvinotoolkit/openvino.genai" title="OpenVINO GenAI" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/vendor/openvino-genai.png" height="36" alt="OpenVINO GenAI" />
+    <img src="web/static/logos/openvino-genai.svg" height="90" alt="OpenVINO GenAI" />
   </a>
   ·
   <a href="https://huggingface.co/docs/optimum/main/en/intel/openvino" title="Optimum-Intel" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/vendor/optimum-intel.png" height="36" alt="Optimum-Intel" />
+    <img src="web/static/logos/vendor/optimum-intel.png" height="90" alt="Optimum-Intel" />
   </a>
   ·
   <a href="https://modelscope.cn" title="ModelScope" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/vendor/modelscope.png" height="36" alt="ModelScope" />
+    <img src="web/static/logos/vendor/modelscope.png" height="90" alt="ModelScope" />
   </a>
   ·
   <a href="https://huggingface.co/docs/transformers/index" title="Transformers" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/vendor/transformers.png" height="36" alt="Transformers" />
+    <img src="web/static/logos/vendor/transformers.png" height="90" alt="Transformers" />
   </a>
   ·
   <a href="https://flask.palletsprojects.com" title="Flask" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/vendor/flask.png" height="36" alt="Flask" />
+    <img src="web/static/logos/vendor/flask.png" height="90" alt="Flask" />
   </a>
   ·
   <a href="https://www.python.org/" title="Python" style="margin:6px;display:inline-block">
-    <img src="web/static/logos/vendor/python.png" height="36" alt="Python" />
+    <img src="web/static/logos/vendor/python.png" height="90" alt="Python" />
   </a>
 </div>
 

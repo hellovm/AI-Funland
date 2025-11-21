@@ -42,6 +42,11 @@
               <div class="row">
                 <button id="btn_generate" data-i18n="generate" aria-label="Generate">发送</button>
               </div>
+            <div class="row small">
+                <label><input type="checkbox" id="use_ctx" checked> 使用上下文</label>
+                <label><input type="checkbox" id="deep_think"> 深度思考</label>
+                <label><input type="checkbox" id="web_search"> 联网检索</label>
+            </div>
               <div class="row">
                 <input id="chat_search" class="grow" placeholder="搜索历史（预留）" aria-label="Search history">
               </div>
@@ -62,30 +67,30 @@
         </aside>
         </div>
       </section>
-      <section id="page_models" class="page">
-        <section class="card">
-          <h2>模型管理</h2>
-          <div class="row">
-            <input id="model_id" placeholder="modelscope id" class="grow" value="qwen/Qwen2.5-0.5B-Instruct">
-            <button id="btn_download">下载</button>
-            <button id="btn_dl_quant_int8">下载+INT8量化</button>
-          </div>
-          <div class="row small">
-            <input id="include" placeholder="include patterns">
-            <input id="exclude" placeholder="exclude patterns">
-            <input id="revision" placeholder="revision">
-          </div>
-          <div id="download_status"></div>
+        <section id="page_models" class="page">
+          <section class="card">
+            <h2>模型管理</h2>
+            <div class="row">
+              <input id="model_id" placeholder="modelscope id" class="grow" value="qwen/Qwen2.5-0.5B-Instruct">
+              <button id="btn_download">下载</button>
+              <button id="btn_dl_quant_int8">下载+INT8量化</button>
+            </div>
+            <div class="row small">
+              <input id="include" placeholder="include patterns">
+              <input id="exclude" placeholder="exclude patterns">
+              <input id="revision" placeholder="revision">
+            </div>
+            
+            <div id="download_status"></div>
+          </section>
+          <section class="card">
+            <div class="row">
+              <button id="btn_quant_int8">INT8量化</button>
+              <button id="btn_release">释放模型</button>
+            </div>
+            <div class="list" id="model_list"></div>
+          </section>
         </section>
-        <section class="card">
-          <div class="row">
-            <button id="btn_quant_int8">INT8量化</button>
-            <button id="btn_quant_int4">INT4量化</button>
-            <button id="btn_release">释放模型</button>
-          </div>
-          <div class="list" id="model_list"></div>
-        </section>
-      </section>
       <section id="page_settings" class="page">
         <section class="card">
           <h2>系统配置</h2>
@@ -93,13 +98,13 @@
             <select id="perf_mode" aria-label="Performance mode">
               <option value="LATENCY">Latency</option>
               <option value="THROUGHPUT">Throughput</option>
-              <option value="CUMULATIVE_THROUGHPUT">Cumulative Throughput</option>
+              <option value="CUMULATIVE_THROUGHPUT" selected>Cumulative Throughput</option>
             </select>
             <button id="btn_wizard" aria-label="Config Wizard">向导</button>
           </div>
           <div class="row small">
-            <label><input type="checkbox" id="auto_perf"> 自动性能优化</label>
-            <label><input type="checkbox" id="auto_multi"> 自动协同切换</label>
+            <label><input type="checkbox" id="auto_perf" checked> 自动性能优化</label>
+            <label><input type="checkbox" id="hetero_enable" checked> 异构并行(HETERO 管线并行)</label>
           </div>
         </section>
         <section class="card" id="advanced_card">
@@ -117,6 +122,20 @@
                 <button data-value="4">4</button>
               </div>
             </div>
+          <div class="fieldgroup">
+            <label>异构策略</label>
+            <div class="segmented" role="group" aria-label="HETERO Policy">
+              <button data-policy="PIPELINE_PARALLEL" class="active">管线并行</button>
+            </div>
+          </div>
+          <div class="fieldgroup">
+            <label>异构平衡</label>
+            <div class="segmented" role="group" aria-label="HETERO Balance">
+              <button data-hetero-balance="igpu_first">iGPU主导</button>
+              <button data-hetero-balance="balanced" class="active">均衡(NPU→GPU→CPU)</button>
+              <button data-hetero-balance="npu_first">NPU主导</button>
+            </div>
+          </div>
             <div class="fieldgroup">
               <label for="tiles_slider">Tiles</label>
               <input id="tiles_slider" type="range" min="1" max="4" step="1" aria-label="Tiles">
@@ -138,6 +157,10 @@
             <div id="device_arch" class="list"></div>
           </div>
           <div class="fieldgroup">
+            <label>硬件型号与内存</label>
+            <div id="hardware_view" class="foot"></div>
+          </div>
+          <div class="fieldgroup">
             <label>OpenVINO Hints</label>
             <div id="ov_hints_view" class="foot"></div>
           </div>
@@ -156,11 +179,39 @@
         </section>
     </main>
     <footer class="foot">
-      <center><span>V0.0.2 Dev · 2025-11-20 · Powered by <a href="https://hellovm.com">HelloVM</a>  · <a href="https://github.com/hellovm/AI-Funland">Check on Github</a></span></center>
+      <center><span>V0.0.3 Dev · 2025-11-21 · Powered by <a href="https://hellovm.com">HelloVM</a>  · <a href="https://github.com/hellovm/AI-Funland">Check on Github</a></span></center>
     </footer>
   </div>
   <div id="loading_overlay" class="overlay hidden"><div class="box"><div class="spinner"></div><div id="loading_text">正在初始化模型，首次加载可能需要30-60秒</div><div id="loading_tip" style="display:none">模型加载中，请稍候...</div></div></div>
   <div id="wizard_overlay" class="overlay hidden"><div class="box"><div class="wizard" id="wizard"></div></div></div>
   <script src="/static/app.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded',function(){
+      var acc=document.querySelector('#accelerator');
+      var btns=document.querySelectorAll('button[data-hetero-balance]');
+      function applyActive(mode){
+        btns.forEach(function(b){b.classList.toggle('active',b.getAttribute('data-hetero-balance')===mode)})
+      }
+      function mapTarget(mode){
+        var map={igpu_first:'HETERO:GPU,CPU',balanced:'HETERO:NPU,GPU,CPU',npu_first:'HETERO:NPU,CPU'};
+        return map[mode]||map.balanced
+      }
+      function applyMode(mode){
+        applyActive(mode);
+        try{localStorage.setItem('hetero_balance',mode)}catch(e){}
+        var target=mapTarget(mode);
+        var opt=Array.from(acc.options||[]).find(function(o){return o.value===target});
+        if(opt){acc.value=target;acc.dispatchEvent(new Event('change'))}
+      }
+      btns.forEach(function(btn){
+        btn.addEventListener('click',function(){
+          var mode=btn.getAttribute('data-hetero-balance');
+          applyMode(mode);
+        })
+      })
+      var saved=null;try{saved=localStorage.getItem('hetero_balance')}catch(e){}
+      if(saved){applyActive(saved)}
+    })
+  </script>
 </body>
 </html>
