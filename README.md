@@ -5,7 +5,7 @@
 <h2>Local AI Q&A platform powered by OpenVINO, optimized for Intel Ultra NPU. | 基于 OpenVINO 的本地 AI 问答平台，针对 Intel Ultra 系列 NPU 优化。</h2>
 
 <p>
-📦 Version: <b>V0.0.3 Dev</b> · 🗓️ Release Date: <b>2025-11-21</b>
+📦 Version: <b>V0.0.4 Dev</b> · 🗓️ Release Date: <b>2025-11-22</b>
 </p>
 
 </div>
@@ -43,6 +43,26 @@
 - 更好的电池续航：在移动设备上以更低能耗完成推理，延长工作时长。
 
 适用场景示例：本地问答助手、快速摘要/检索增强生成（RAG）终端、移动办公与演示、教育与科研设备、需要合规/隐私保护的行业应用等。
+
+## Release Notes · V0.0.4 Dev（2025/11/22）
+
+### 更新摘要（中文）
+- 缓存热加载：首次启动平台需加载模型并编译缓存，后续启动自动加载缓存，缩短从启动到可用的等待时间
+- 优化 HETERO 逻辑：提升多硬件（NPU+GPU/CPU）协同效率，默认优先 Intel NPU+GPU，并启用管线并行
+- 已知问题修复：修复 INT8 IR 权重文件缺失导致加载失败、默认设备选择被覆盖等问题
+- 文本生成图片（Text-to-Image）后端开发：完成基础后端能力，前端暂未开放入口
+- Web 页面交互优化：支持 SSE 流式回答；增强上下文理解与思考/最终答案拆分
+- 新增 Pipeline Parallelism 支持：在异构设备上启用管线并行以降低尾时延
+- 修正 Thinking 过程不显示的问题：折叠/展开与复制逻辑完善
+
+### Release Summary (English)
+- Cache warm loading: compile and cache models on first launch; subsequent starts auto-load cache to reduce readiness time
+- HETERO logic optimization: better multi-device coordination; default prefer Intel NPU+GPU with pipeline parallelism
+- Bug fixes: address missing INT8 IR bin causing load failure; fix default device selection being overwritten
+- Text-to-Image backend: initial backend implemented (frontend UI not exposed yet)
+- Web UX improvements: streaming SSE answers; enhanced context understanding and think/final split
+- Add support of Pipeline Parallelism on heterogeneous devices
+- Fix issue where Thinking content was not displayed properly
 
 ## Release Notes · V0.0.3 Dev（2025/11/21）
 

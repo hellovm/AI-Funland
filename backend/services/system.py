@@ -21,7 +21,7 @@ def _nvidia_info():
 
 def _openvino_devices():
     try:
-        from openvino.runtime import Core
+        from openvino import Core
         core = Core()
         return core.available_devices
     except Exception:
@@ -107,13 +107,11 @@ def get_info():
         accelerators.append({"id": "GPU", "label": "Intel GPU"})
     # cooperative acceleration options
     combos = []
-    if has_npu and has_gpu and has_cpu:
-        combos.append({"id": "HETERO:NPU,GPU,CPU", "label": "Intel NPU+Intel GPU+Intel CPU（异构）"})
+    if has_npu and has_gpu:
+        combos.append({"id": "HETERO:NPU,GPU", "label": "Intel NPU+Intel GPU（异构）"})
+    if has_npu and has_cpu:
         combos.append({"id": "HETERO:NPU,CPU", "label": "Intel NPU+Intel CPU（异构）"})
-        combos.append({"id": "HETERO:GPU,CPU", "label": "Intel GPU+Intel CPU（异构）"})
-    elif has_npu and has_cpu:
-        combos.append({"id": "HETERO:NPU,CPU", "label": "Intel NPU+Intel CPU（异构）"})
-    elif has_gpu and has_cpu:
+    if has_gpu and has_cpu:
         combos.append({"id": "HETERO:GPU,CPU", "label": "Intel GPU+Intel CPU（异构）"})
     accelerators = combos + accelerators
     # library versions
@@ -159,7 +157,7 @@ def get_info():
         genv = None
     arch = {}
     try:
-        from openvino.runtime import Core as _Core
+        from openvino import Core as _Core
         _c = _Core()
         if "NPU" in devices:
             try:
@@ -189,7 +187,7 @@ def get_info():
         "NPU_TILES": _os.environ.get("NPU_TILES"),
     }
     try:
-        from openvino.runtime import Core as _Core
+        from openvino import Core as _Core
         _hc = _Core()
         try:
             hp = _hc.get_property("HETERO", "MULTI_DEVICE_PRIORITIES")

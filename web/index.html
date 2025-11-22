@@ -24,6 +24,8 @@
         </select>
         <select id="accelerator" aria-label="Accelerator"></select>
         <button id="btn_release_global" data-i18n="release" aria-label="Release model">Release</button>
+        <button id="btn_pipeline_top" aria-label="Pipeline iGPU+NPU">一键管线</button>
+        <span id="pipeline_status" aria-label="Pipeline status">未启用</span>
       </div>
     </header>
     
@@ -101,6 +103,8 @@
               <option value="CUMULATIVE_THROUGHPUT" selected>Cumulative Throughput</option>
             </select>
             <button id="btn_wizard" aria-label="Config Wizard">向导</button>
+            <button id="btn_clear_cache" aria-label="Clear Cache">清除缓存</button>
+            <button id="btn_pipeline" aria-label="Pipeline iGPU+NPU">iGPU+NPU管线</button>
           </div>
           <div class="row small">
             <label><input type="checkbox" id="auto_perf" checked> 自动性能优化</label>

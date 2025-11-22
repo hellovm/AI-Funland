@@ -4,24 +4,62 @@ _pipe_cache = {}
 
 def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
     import openvino_genai as ov_genai
-    # ensure tokenizer IR exists in model_dir; if missing, try to convert from HF tokenizer
-    tok_xml = model_dir / "openvino_tokenizer.xml"
+    target_dir = model_dir
+    src_dir = model_dir
+    try:
+        if not (target_dir / "openvino_model.xml").exists():
+            cand = model_dir.parent / (model_dir.name + "_ov_fp32")
+            if (cand / "openvino_model.xml").exists():
+                target_dir = cand
+            else:
+                try:
+                    from backend.services.inference import export_model_ir as _export
+                    _export(model_dir, cand)
+                    target_dir = cand if (cand / "openvino_model.xml").exists() else model_dir
+                except Exception:
+                    target_dir = model_dir
+        else:
+            try:
+                binf = target_dir / "openvino_model.bin"
+                need_fallback = (not binf.exists())
+                if not need_fallback:
+                    try:
+                        need_fallback = (binf.stat().st_size <= 0)
+                    except Exception:
+                        need_fallback = True
+                if need_fallback:
+                    base = model_dir.name.split("_quant_", 1)[0]
+                    cand = model_dir.parent / (base + "_ov_fp32")
+                    if (cand / "openvino_model.xml").exists() and (cand / "openvino_model.bin").exists():
+                        target_dir = cand
+                    else:
+                        try:
+                            from backend.services.inference import export_model_ir as _export
+                            _export(model_dir, cand)
+                            if (cand / "openvino_model.bin").exists():
+                                target_dir = cand
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+    except Exception:
+        target_dir = model_dir
+    tok_xml = target_dir / "openvino_tokenizer.xml"
     if not tok_xml.exists():
         try:
             from transformers import AutoTokenizer
             from openvino_tokenizers import convert_tokenizer
             import openvino as ov
-            src_dir = model_dir
             has_tok = any((src_dir / n).exists() for n in ("tokenizer.json","tokenizer_config.json","vocab.json","merges.txt"))
             if not has_tok:
-                base_name = model_dir.name.split("_quant_")[0]
-                cand = model_dir.parent / base_name
-                if any((cand / n).exists() for n in ("tokenizer.json","tokenizer_config.json","vocab.json","merges.txt")):
-                    src_dir = cand
+                base_name = src_dir.name.split("_quant_")[0]
+                alt = src_dir.parent / base_name
+                if any((alt / n).exists() for n in ("tokenizer.json","tokenizer_config.json","vocab.json","merges.txt")):
+                    src_dir = alt
             hf_tok = AutoTokenizer.from_pretrained(str(src_dir), trust_remote_code=True)
             ov_tok, ov_detok = convert_tokenizer(hf_tok, with_detokenizer=True)
             ov.save_model(ov_tok, str(tok_xml))
-            ov.save_model(ov_detok, str(model_dir / "openvino_detokenizer.xml"))
+            ov.save_model(ov_detok, str(target_dir / "openvino_detokenizer.xml"))
         except Exception:
             pass
     import os
@@ -88,9 +126,9 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
         os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
     except Exception:
         pass
-    if config and ((device == "NPU") or ("NPU" in device) or device.startswith("AUTO") or device.startswith("MULTI")):
+    if config and (device.startswith("AUTO") or device.startswith("MULTI")):
         try:
-            from openvino.runtime import Core as _Core
+            from openvino import Core as _Core
             _core = _Core()
             _devs = _core.available_devices
             ordered_gpus = _ordered_gpu_list(_core)
@@ -116,6 +154,43 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
         perf_mode = config.get("perf_mode")
     if (perf_mode is None) or (str(perf_mode).upper() == "AUTO"):
         perf_mode = "CUMULATIVE_THROUGHPUT"
+    # enforce low-latency iGPU+NPU pipeline when requested
+    try:
+        if config and config.get("prefill_igpu_decode_npu"):
+            try:
+                from openvino import Core as _Core
+                _core = _Core()
+                ordered_gpus = _ordered_gpu_list(_core)
+                igpu = ordered_gpus[0] if ordered_gpus else "GPU"
+            except Exception:
+                igpu = "GPU"
+            # force device order to GPU first then NPU then CPU
+            if device.startswith("HETERO:"):
+                device = f"HETERO:{igpu},NPU"
+            perf_mode = "LATENCY"
+            os.environ["OV_PERFORMANCE_HINT"] = "LATENCY"
+            os.environ["OV_NUM_STREAMS"] = "1"
+            os.environ["OV_HINT_NUM_REQUESTS"] = "1"
+            os.environ["NPU_RUN_INFERENCES_SEQUENTIALLY"] = "YES"
+            try:
+                from openvino import Core as _Core, hint as _hint
+                _c = _Core()
+                _c.set_property("HETERO", {_hint.model_distribution_policy: _hint.ModelDistributionPolicy.PIPELINE_PARALLEL})
+            except Exception:
+                try:
+                    from openvino import Core as _Core
+                    _c2 = _Core()
+                    _c2.set_property("HETERO", {"MODEL_DISTRIBUTION_POLICY": "PIPELINE_PARALLEL"})
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    try:
+        if device.startswith("HETERO:") and ("NPU" in device) and ("GPU" in device):
+            if str(perf_mode).upper() != "LATENCY":
+                perf_mode = "LATENCY"
+    except Exception:
+        pass
     try:
         if perf_mode in ("LATENCY", "THROUGHPUT", "CUMULATIVE_THROUGHPUT"):
             os.environ["OV_PERFORMANCE_HINT"] = perf_mode
@@ -133,7 +208,7 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
         if streams:
             os.environ["OV_NUM_STREAMS"] = str(streams)
         else:
-            os.environ.setdefault("OV_NUM_STREAMS", "2")
+            os.environ.setdefault("OV_NUM_STREAMS", "1")
         if perf_mode in ("LATENCY", "THROUGHPUT", "CUMULATIVE_THROUGHPUT"):
             os.environ["OV_PERFORMANCE_HINT"] = perf_mode
         else:
@@ -153,7 +228,7 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
                 os.environ.setdefault("OV_HINT_NUM_REQUESTS", "6")
             # detect NPU architecture to set tiles and num_requests
             try:
-                from openvino.runtime import Core
+                from openvino import Core
                 core = Core()
                 arch = core.get_property("NPU", "DEVICE_ARCHITECTURE")
                 arch_s = str(arch).lower()
@@ -222,7 +297,7 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
                         pipe_cfg["MIN_RESPONSE_LEN"] = int(mrl)
             except Exception:
                 pass
-            obj = ov_genai.LLMPipeline(str(model_dir), dev_str, pipe_cfg)
+            obj = ov_genai.LLMPipeline(str(target_dir), dev_str, pipe_cfg)
             try:
                 setattr(obj, "_af_device_real", dev_str)
             except Exception:
@@ -233,7 +308,7 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
                 devs = device.split(":",1)[1]
                 # map generic GPU to Intel iGPU first when available
                 try:
-                    from openvino.runtime import Core as _Core
+                    from openvino import Core as _Core
                     _hc = _Core()
                     ordered_gpus = _ordered_gpu_list(_hc)
                     igpu = ordered_gpus[0] if ordered_gpus else None
@@ -244,6 +319,17 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
                             mapped.append(igpu)
                         else:
                             mapped.append(d)
+                    try:
+                        has_gpu = any(x.startswith("GPU") for x in mapped)
+                        has_npu = any(x.startswith("NPU") for x in mapped)
+                        has_cpu = any(x == "CPU" for x in mapped)
+                        if has_gpu and has_npu:
+                            pref_gpu = [x for x in mapped if x.startswith("GPU")]
+                            pref_npu = [x for x in mapped if x.startswith("NPU")]
+                            rest_cpu = ["CPU"] if has_cpu else []
+                            mapped = pref_gpu + pref_npu + rest_cpu
+                    except Exception:
+                        pass
                     devs = ",".join(mapped)
                     try:
                         _hc.set_property("HETERO", {"MODEL_DISTRIBUTION_POLICY": "PIPELINE_PARALLEL"})
@@ -255,26 +341,31 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
                     p = _try(f"HETERO:{devs}")
                 except Exception as e:
                     try:
-                        import os as _os
-                        _os.environ.setdefault("AUTO_DEVICE_PRIORITY", devs)
-                    except Exception:
-                        pass
-                    try:
-                        from openvino.runtime import Core as _Core
-                        _c = _Core()
-                        _c.set_property("AUTO", {"PERFORMANCE_HINT": perf_mode, "MODEL_DISTRIBUTION_POLICY": "PIPELINE_PARALLEL"})
-                    except Exception:
-                        pass
-                    try:
-                        p = _try(f"AUTO:{devs}")
+                        p = _try(f"MULTI:{devs}")
                     except Exception:
                         p = None
-                        raise e
+                    if p is None:
+                        try:
+                            import os as _os
+                            _os.environ.setdefault("AUTO_DEVICE_PRIORITY", devs)
+                        except Exception:
+                            pass
+                        try:
+                            from openvino import Core as _Core
+                            _c = _Core()
+                            _c.set_property("AUTO", {"PERFORMANCE_HINT": perf_mode, "MODEL_DISTRIBUTION_POLICY": "PIPELINE_PARALLEL"})
+                        except Exception:
+                            pass
+                        try:
+                            p = _try(f"AUTO:{devs}")
+                        except Exception:
+                            p = None
+                            raise e
             elif device.startswith("MULTI:"):
                 devs = device.split(":",1)[1]
                 # map to HETERO with pipeline parallelism, GPU prioritized to Intel iGPU
                 try:
-                    from openvino.runtime import Core as _Core
+                    from openvino import Core as _Core
                     _hc = _Core()
                     ordered_gpus = _ordered_gpu_list(_hc)
                     igpu = ordered_gpus[0] if ordered_gpus else None
@@ -285,6 +376,17 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
                             mapped.append(igpu)
                         else:
                             mapped.append(d)
+                    try:
+                        has_gpu = any(x.startswith("GPU") for x in mapped)
+                        has_npu = any(x.startswith("NPU") for x in mapped)
+                        has_cpu = any(x == "CPU" for x in mapped)
+                        if has_gpu and has_npu:
+                            pref_gpu = [x for x in mapped if x.startswith("GPU")]
+                            pref_npu = [x for x in mapped if x.startswith("NPU")]
+                            rest_cpu = ["CPU"] if has_cpu else []
+                            mapped = pref_gpu + pref_npu + rest_cpu
+                    except Exception:
+                        pass
                     devs = ",".join(mapped)
                     try:
                         _hc.set_property("HETERO", {"MODEL_DISTRIBUTION_POLICY": "PIPELINE_PARALLEL"})
@@ -311,16 +413,16 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
                     devs = device.split(":",1)[1]
                 else:
                     try:
-                        from openvino.runtime import Core
+                        from openvino import Core
                         c = Core()
                         avail = c.available_devices
                         prio = []
                         ordered_gpus = _ordered_gpu_list(c)
+                        if any(d.startswith("NPU") for d in avail):
+                            prio.append("NPU")
                         if ordered_gpus:
                             prio.extend(ordered_gpus)
-                        if any(d.startswith("NPU") for d in avail) and (not any(d.startswith("NPU") for d in prio)):
-                            prio.append("NPU")
-                        if "CPU" in avail and ("CPU" not in prio):
+                        if "CPU" in avail:
                             prio.append("CPU")
                         devs = ",".join(prio) if prio else None
                     except Exception:
@@ -330,7 +432,7 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
                     if perf_mode in ("THROUGHPUT", "CUMULATIVE_THROUGHPUT"):
                         os.environ.setdefault("OV_HINT_NUM_REQUESTS", "4")
                     try:
-                        from openvino.runtime import Core
+                        from openvino import Core
                         c = Core()
                         c.set_property("AUTO", {"PERFORMANCE_HINT": perf_mode, "MODEL_DISTRIBUTION_POLICY": "PIPELINE_PARALLEL"})
                     except Exception:
@@ -363,7 +465,7 @@ def load_pipeline(model_dir: Path, device: str, config: dict | None = None):
             msg = str(e)
             order = []
             try:
-                from openvino.runtime import Core
+                from openvino import Core
                 core = Core()
                 order = core.available_devices
             except Exception:
@@ -425,7 +527,7 @@ def generate(pipe, prompt: str, config: dict):
         except Exception:
             res = pipe.generate([prompt])
     try:
-        text = res.text if hasattr(res, "text") else (res[0] if isinstance(res, (list, tuple)) and len(res)>0 else str(res))
+        text = res.text if hasattr(res, "text") else (res[0] if isinstance(res, (list, tuple)) and len(res) > 0 else str(res))
     except Exception:
         text = str(res)
     metrics = None
@@ -441,6 +543,16 @@ def generate(pipe, prompt: str, config: dict):
     except Exception:
         metrics = None
     return text, metrics
+
+
+ 
+
+
+ 
+ 
+
+ 
+ 
 
 def generate_stream(pipe, prompt: str, config: dict, streamer):
     if config:
@@ -532,18 +644,104 @@ def quantize_model(model_dir: Path, save_dir: Path, mode: str = "int8", params: 
     mmode = str(mode).lower()
     if mmode != "int8":
         raise ValueError("int4_disabled")
-    qc = OVWeightQuantizationConfig(bits=8)
-    m = OVModelForCausalLM.from_pretrained(str(model_dir), quantization_config=qc, trust_remote_code=True)
-    m.save_pretrained(str(save_dir))
-    # ensure tokenizer IR exists in save_dir by converting from source HF tokenizer
+    src_dir = model_dir
     try:
-        from transformers import AutoTokenizer
-        from openvino_tokenizers import convert_tokenizer
-        import openvino as ov
-        hf_tok = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True)
-        ov_tok, ov_detok = convert_tokenizer(hf_tok, with_detokenizer=True)
-        ov.save_model(ov_tok, str(save_dir / "openvino_tokenizer.xml"))
-        ov.save_model(ov_detok, str(save_dir / "openvino_detokenizer.xml"))
+        if not (src_dir / "openvino_model.xml").exists():
+            cand = model_dir.parent / (model_dir.name + "_ov_fp32")
+            if (cand / "openvino_model.xml").exists():
+                src_dir = cand
+            else:
+                try:
+                    export_model_ir(model_dir, cand)
+                    src_dir = cand if (cand / "openvino_model.xml").exists() else model_dir
+                except Exception:
+                    src_dir = model_dir
+    except Exception:
+        src_dir = model_dir
+    qc = OVWeightQuantizationConfig(bits=8)
+    m = OVModelForCausalLM.from_pretrained(str(src_dir), quantization_config=qc, trust_remote_code=True)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    m.save_pretrained(str(save_dir))
+    try:
+        xml = save_dir / "openvino_model.xml"
+        binf = save_dir / "openvino_model.bin"
+        need_cli = (not xml.exists()) or (not binf.exists())
+        if not need_cli:
+            try:
+                need_cli = (binf.stat().st_size <= 0)
+            except Exception:
+                need_cli = True
+        if need_cli:
+            import sys, os, subprocess
+            exe = sys.executable
+            env = {**os.environ}
+            cmd = [
+                exe, "-m", "optimum.exporters.openvino.convert",
+                "--model", str(src_dir),
+                "--output", str(save_dir),
+                "--task", "text-generation-with-past",
+                "--library", "transformers",
+                "--trust-remote-code",
+                "--weight-format", "int8",
+            ]
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     except Exception:
         pass
+    try:
+        from shutil import copyfile
+        for n in ("openvino_tokenizer.xml", "openvino_detokenizer.xml"):
+            fp = src_dir / n
+            if fp.exists():
+                copyfile(str(fp), str(save_dir / n))
+        for f in ("tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"):
+            try:
+                sp = src_dir / f
+                if sp.exists():
+                    copyfile(str(sp), str(save_dir / f))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return str(save_dir)
+
+def export_model_ir(model_dir: Path, save_dir: Path):
+    from optimum.intel.openvino import OVModelForCausalLM
+    import shutil, os, sys, subprocess
+    save_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        try:
+            from transformers import AutoConfig
+            cfg = AutoConfig.from_pretrained(str(model_dir), trust_remote_code=True)
+            try:
+                setattr(cfg, "use_cache", False)
+            except Exception:
+                pass
+        except Exception:
+            cfg = None
+        m = OVModelForCausalLM.from_pretrained(
+            str(model_dir), export=True, trust_remote_code=True, attn_implementation="eager", config=cfg
+        )
+        m.save_pretrained(str(save_dir))
+    except Exception:
+        exe = sys.executable
+        env = {**os.environ, "HF_ATTENTION_IMPLEMENTATION": "eager"}
+        cmd = [
+            exe, "-m", "optimum.exporters.openvino.convert",
+            "--model", str(model_dir),
+            "--output", str(save_dir),
+            "--task", "text-generation-with-past",
+            "--library", "transformers",
+            "--trust-remote-code"
+        ]
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        except Exception as e2:
+            raise e2
+    for f in ("tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "special_tokens_map.json"):
+        try:
+            src = model_dir / f
+            if src.exists():
+                shutil.copy(src, save_dir / f)
+        except Exception:
+            pass
     return str(save_dir)

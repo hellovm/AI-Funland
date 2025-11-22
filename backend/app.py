@@ -99,8 +99,8 @@ def _preload_on_start():
         mid = _pick_default_model_id()
         if not mid:
             return
-        dev = os.environ.get("AIFUNLAND_DEFAULT_DEVICE") or "HETERO:NPU,GPU,CPU"
-        cfg = {"perf_mode": "LATENCY", "hetero_enable": True, "max_prompt_len": 512, "min_response_len": 8}
+        dev = os.environ.get("AIFUNLAND_DEFAULT_DEVICE") or "HETERO:NPU,GPU"
+        cfg = {"perf_mode": "LATENCY", "hetero_enable": True, "max_prompt_len": 512, "min_response_len": 8, "auto_multi": True, "prefill_igpu_decode_npu": True}
         model_dir = MODELS_DIR / mid
         def _bg():
             try:
@@ -171,6 +171,12 @@ def _run_modelscope_download(task_id, model_id, local_dir, include=None, exclude
         code = proc.wait()
         if code == 0:
             task_store.complete(task_id, result=str(local_dir))
+            try:
+                from backend.services.inference import export_model_ir
+                save_dir = MODELS_DIR / (local_dir.name + "_ov_fp32")
+                threading.Thread(target=lambda: export_model_ir(local_dir, save_dir), daemon=True).start()
+            except Exception:
+                pass
         else:
             parts = model_id.split("/")
             if len(parts) == 2 and parts[0] != parts[0].lower():
@@ -197,6 +203,12 @@ def _run_modelscope_download(task_id, model_id, local_dir, include=None, exclude
                 code2 = proc2.wait()
                 if code2 == 0:
                     task_store.complete(task_id, result=str(local_dir))
+                    try:
+                        from backend.services.inference import export_model_ir
+                        save_dir = MODELS_DIR / (local_dir.name + "_ov_fp32")
+                        threading.Thread(target=lambda: export_model_ir(local_dir, save_dir), daemon=True).start()
+                    except Exception:
+                        pass
                     return
             try:
                 from modelscope import snapshot_download
@@ -228,6 +240,12 @@ def _run_modelscope_download(task_id, model_id, local_dir, include=None, exclude
                 mon.start()
                 t.join()
                 task_store.complete(task_id, result=str(local_dir))
+                try:
+                    from backend.services.inference import export_model_ir
+                    save_dir = MODELS_DIR / (local_dir.name + "_ov_fp32")
+                    threading.Thread(target=lambda: export_model_ir(local_dir, save_dir), daemon=True).start()
+                except Exception:
+                    pass
             except Exception as e2:
                 task_store.update(task_id, status="error", error=f"exit {code}: {str(e2)}")
     except Exception as e:
@@ -260,6 +278,28 @@ def api_models_download():
     task_id = task_store.create("download")
     t = threading.Thread(target=_run_modelscope_download, args=(task_id, model_id, dest, include, exclude, revision), daemon=True)
     t.start()
+    return jsonify({"task_id": task_id})
+
+@app.post("/api/models/export_ir")
+def api_models_export_ir():
+    data = request.get_json(force=True)
+    model_id = data.get("model_id")
+    if not model_id:
+        return jsonify({"error": "model_id required"}), 400
+    src = MODELS_DIR / model_id.replace("/", "__")
+    if not src.exists():
+        return jsonify({"error": "model_not_found"}), 404
+    dest = MODELS_DIR / (src.name + "_ov_fp32")
+    task_id = task_store.create("export_ir")
+    def _bg():
+        try:
+            from backend.services.inference import export_model_ir
+            task_store.update(task_id, status="running", progress=1, message="exporting")
+            result = export_model_ir(src, dest)
+            task_store.complete(task_id, result=result)
+        except Exception as e:
+            task_store.update(task_id, status="error", error=str(e))
+    threading.Thread(target=_bg, daemon=True).start()
     return jsonify({"task_id": task_id})
 
 @app.get("/api/tasks/<task_id>")
@@ -378,6 +418,7 @@ def api_infer_chat():
         cur_real = getattr(pipe, "_af_device_real", cur_dev)
         cur_real = getattr(pipe, "_af_device_real", cur_dev)
         cur_real = getattr(pipe, "_af_device_real", cur_dev)
+        cur_real = getattr(pipe, "_af_device_real", cur_dev)
         output, metrics = generate(pipe, prompt, config)
         try:
             s = str(output)
@@ -471,6 +512,12 @@ def api_infer_preload():
     if not model_dir.exists():
         return jsonify({"error": "model_not_found"}), 404
     cfg = data.get("config", {})
+    if "hetero_enable" not in cfg:
+        cfg["hetero_enable"] = True
+    if "auto_multi" not in cfg:
+        cfg["auto_multi"] = True
+    if "prefill_igpu_decode_npu" not in cfg:
+        cfg["prefill_igpu_decode_npu"] = True
     if str(cfg.get("perf_mode", "")).upper() == "AUTO":
         try:
             cfg["perf_mode"] = _choose_perf_mode(cfg, device)
@@ -502,6 +549,10 @@ def api_infer_stream():
         config = {}
     if "hetero_enable" not in config:
         config["hetero_enable"] = True
+    if "auto_multi" not in config:
+        config["auto_multi"] = True
+    if "prefill_igpu_decode_npu" not in config:
+        config["prefill_igpu_decode_npu"] = True
     if not model_id or not prompt:
         def _err():
             yield "event: error\n"
@@ -726,6 +777,36 @@ def api_perf():
         "usage": usage,
         "hetero_participation": hp
     })
+
+@app.post("/api/system/clear_cache")
+def api_system_clear_cache():
+    try:
+        base = _get_cache_dir()
+        ov = base / "ov_cache"
+        try:
+            import shutil as _sh
+            if ov.exists():
+                _sh.rmtree(ov)
+        except Exception:
+            pass
+        try:
+            ov.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            for k in ("CPU","GPU","NPU","NVIDIA"):
+                PERF["lat"][k].clear()
+                PERF["ttft"][k].clear()
+                PERF["tpot"][k].clear()
+                PERF["throughput"][k].clear()
+                PERF["gen"][k].clear()
+        except Exception:
+            pass
+        PERF["last"] = {}
+        PERF["warn"] = None
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 def run():
     try:
